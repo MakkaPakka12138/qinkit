@@ -243,7 +243,7 @@ fn normalize_command_text(input: &str) -> String {
 }
 
 #[cfg(target_os = "windows")]
-fn significant_command_tokens(input: &str) -> Vec<String> {
+fn command_tokens(input: &str) -> Vec<String> {
     input
         .split(|ch: char| {
             ch.is_whitespace()
@@ -263,16 +263,34 @@ fn significant_command_tokens(input: &str) -> Vec<String> {
 }
 
 #[cfg(target_os = "windows")]
+fn contains_token_sequence(process_tokens: &[String], service_tokens: &[String]) -> bool {
+    if service_tokens.is_empty() {
+        return false;
+    }
+
+    let mut search_start = 0usize;
+    for service_token in service_tokens {
+        let Some(found_offset) = process_tokens[search_start..]
+            .iter()
+            .position(|process_token| process_token.contains(service_token))
+        else {
+            return false;
+        };
+        search_start += found_offset + 1;
+    }
+
+    true
+}
+
+#[cfg(target_os = "windows")]
 fn process_match_score(service: &ServiceConfig, process: &SystemProcessInfo) -> usize {
-    let process_command = match &process.command_line {
-        Some(command) if !command.trim().is_empty() => normalize_command_text(command),
+    let process_command_raw = match &process.command_line {
+        Some(command) if !command.trim().is_empty() => command,
         _ => return 0,
     };
     let service_command = normalize_command_text(&service.command);
-    if service_command.is_empty() || process_command.is_empty() {
-        return 0;
-    }
-    if process.process_id == std::process::id() {
+    let process_command = normalize_command_text(process_command_raw);
+    if service_command.is_empty() || process_command.is_empty() || process.process_id == std::process::id() {
         return 0;
     }
 
@@ -280,32 +298,21 @@ fn process_match_score(service: &ServiceConfig, process: &SystemProcessInfo) -> 
         return 10_000 + service_command.len();
     }
 
-    let tokens = significant_command_tokens(&service.command);
-    if tokens.is_empty() {
+    let service_tokens = command_tokens(&service.command);
+    if service_tokens.is_empty() {
         return 0;
     }
 
-    let first_token = &tokens[0];
-    if !process_command.contains(first_token) {
+    let process_tokens = command_tokens(process_command_raw);
+    if process_tokens.is_empty() {
         return 0;
     }
 
-    let matched_count = tokens
-        .iter()
-        .filter(|token| process_command.contains(token.as_str()))
-        .count();
-    let required_matches = match tokens.len() {
-        0 => 0,
-        1 => 1,
-        2 => 2,
-        _ => 3,
-    };
-
-    if matched_count < required_matches {
+    if !contains_token_sequence(&process_tokens, &service_tokens) {
         return 0;
     }
 
-    100 + matched_count
+    1_000 + service_tokens.len()
 }
 
 #[cfg(target_os = "windows")]
