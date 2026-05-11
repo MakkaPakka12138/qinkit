@@ -24,6 +24,17 @@ const appWindow = getCurrentWindow();
 const THEME_STORAGE_KEY = "lite-service-manager-theme";
 const CLOSE_TO_TRAY_STORAGE_KEY = "lite-service-manager-close-to-tray";
 const PROCESS_SCAN_BACKOFF_MS = [10_000, 20_000, 30_000, 60_000, 120_000, 300_000];
+const LOG_REFRESH_OPTIONS = [
+  { key: "off", label: "不刷新", intervalMs: 0 },
+  { key: "5s", label: "5s", intervalMs: 5_000 },
+  { key: "10s", label: "10s", intervalMs: 10_000 },
+  { key: "15s", label: "15s", intervalMs: 15_000 },
+  { key: "30s", label: "30s", intervalMs: 30_000 },
+  { key: "60s", label: "60s", intervalMs: 60_000 },
+  { key: "realtime", label: "实时刷新", intervalMs: 1_200 }
+] as const;
+
+type LogRefreshKey = (typeof LOG_REFRESH_OPTIONS)[number]["key"];
 
 type RefreshOptions = {
   quiet?: boolean;
@@ -57,6 +68,7 @@ export default function App() {
   const [logModalOpen, setLogModalOpen] = useState(false);
   const [logServiceId, setLogServiceId] = useState("");
   const [activeLogType, setActiveLogType] = useState<LogType>("stdout");
+  const [logRefreshKey, setLogRefreshKey] = useState<LogRefreshKey>("off");
   const [logText, setLogText] = useState("");
   const [windowMaximized, setWindowMaximized] = useState(false);
   const [workspaceScrollable, setWorkspaceScrollable] = useState(false);
@@ -79,6 +91,10 @@ export default function App() {
     if (!logService) return "";
     return activeLogType === "stdout" ? logService.stdout_log : logService.stderr_log;
   }, [activeLogType, logService]);
+  const activeLogRefreshOption = useMemo(
+    () => LOG_REFRESH_OPTIONS.find((option) => option.key === logRefreshKey) ?? LOG_REFRESH_OPTIONS[0],
+    [logRefreshKey]
+  );
   const selectedServiceIdSet = useMemo(() => new Set(selectedServiceIds), [selectedServiceIds]);
   const selectedCount = selectedServiceIds.length;
   const allSelected = services.length > 0 && selectedCount === services.length;
@@ -178,14 +194,18 @@ export default function App() {
     if (!logModalOpen || !logServiceId) return undefined;
 
     void readActiveLog();
+    if (activeLogRefreshOption.intervalMs <= 0) {
+      return undefined;
+    }
+
     const timer = window.setInterval(() => {
       void readActiveLog();
-    }, 1200);
+    }, activeLogRefreshOption.intervalMs);
 
     return () => {
       window.clearInterval(timer);
     };
-  }, [activeLogType, logModalOpen, logServiceId]);
+  }, [activeLogRefreshOption.intervalMs, activeLogType, logModalOpen, logServiceId]);
 
   useEffect(() => {
     function syncWorkspaceOverflow() {
@@ -743,6 +763,13 @@ export default function App() {
     setLogModalOpen(false);
   }
 
+  function cycleLogRefreshInterval() {
+    setLogRefreshKey((current) => {
+      const currentIndex = LOG_REFRESH_OPTIONS.findIndex((option) => option.key === current);
+      return LOG_REFRESH_OPTIONS[(currentIndex + 1) % LOG_REFRESH_OPTIONS.length].key;
+    });
+  }
+
   async function pickDirectory() {
     const picked = await open({
       directory: true,
@@ -968,11 +995,13 @@ export default function App() {
           logService={logService}
           activeLogPath={activeLogPath}
           activeLogType={activeLogType}
+          refreshIntervalLabel={activeLogRefreshOption.label}
           logText={logText}
           logViewRef={logViewRef}
           onClose={closeLogModal}
           onSetActiveLogType={setActiveLogType}
           onRefresh={() => void readActiveLog()}
+          onCycleRefreshInterval={cycleLogRefreshInterval}
           onScrollTo={scrollLogTo}
           onOpenPath={(path) => void openPath(path)}
         />

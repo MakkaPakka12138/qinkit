@@ -943,6 +943,28 @@ textarea:focus {
   flex-shrink: 0;
 }
 
+.log-refresh-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-width: 86px;
+  padding: 8px 11px;
+}
+
+.log-refresh-toggle .icon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+.log-refresh-toggle span {
+  min-width: 36px;
+  text-align: left;
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .log-view {
   flex: 1;
   min-height: 0;

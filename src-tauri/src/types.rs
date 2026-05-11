@@ -79,9 +79,16 @@ pub(crate) struct ServiceManager {
     pub(crate) processes: Arc<Mutex<HashMap<String, RunningProcess>>>,
 }
 
-#[derive(Default)]
 pub(crate) struct WindowBehaviorState {
     pub(crate) close_to_tray: Mutex<bool>,
+}
+
+impl Default for WindowBehaviorState {
+    fn default() -> Self {
+        Self {
+            close_to_tray: Mutex::new(true),
+        }
+    }
 }
 
 #[cfg(target_os = "windows")]
