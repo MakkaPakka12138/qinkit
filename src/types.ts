@@ -13,6 +13,10 @@ export type ServiceConfig = {
   stderr_log: string;
 };
 
+export type ServiceForm = Omit<ServiceConfig, "restart_delay_seconds"> & {
+  restart_delay_seconds: number | "";
+};
+
 export type ServiceView = ServiceConfig & {
   running: boolean;
   pid: number | null;

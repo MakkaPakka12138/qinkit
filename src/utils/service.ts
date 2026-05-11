@@ -1,4 +1,4 @@
-import type { ServiceConfig, ServiceView } from "../types";
+import type { ServiceConfig, ServiceForm, ServiceView } from "../types";
 
 export function toServiceConfig(service: ServiceConfig | ServiceView): ServiceConfig {
   const { id, name, group_name, command, cwd, enabled, auto_start, auto_restart, restart_delay_seconds, log_dir, stdout_log, stderr_log } =
@@ -25,7 +25,7 @@ export function buildDefaultLogDir(cwd: string) {
   return `${root}\\logs`;
 }
 
-export function blankForm(): ServiceConfig {
+export function blankForm(): ServiceForm {
   const id = `svc_${Date.now()}`;
   return {
     id,
@@ -43,7 +43,15 @@ export function blankForm(): ServiceConfig {
   };
 }
 
-export function normalizeService(input: ServiceConfig): ServiceConfig {
+function normalizeRestartDelaySeconds(value: ServiceForm["restart_delay_seconds"]) {
+  if (value === "") {
+    return 3;
+  }
+
+  return Number.isFinite(value) ? Math.max(1, value) : 3;
+}
+
+export function normalizeService(input: ServiceForm): ServiceConfig {
   const id = input.id.trim() || `svc_${Date.now()}`;
   return {
     ...input,
@@ -55,6 +63,6 @@ export function normalizeService(input: ServiceConfig): ServiceConfig {
     log_dir: input.log_dir.trim(),
     stdout_log: input.stdout_log.trim(),
     stderr_log: input.stderr_log.trim(),
-    restart_delay_seconds: Math.max(1, Number(input.restart_delay_seconds || 3))
+    restart_delay_seconds: normalizeRestartDelaySeconds(input.restart_delay_seconds)
   };
 }

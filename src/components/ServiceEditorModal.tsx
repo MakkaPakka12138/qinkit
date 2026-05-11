@@ -1,13 +1,13 @@
-import type { ServiceConfig } from "../types";
+import type { ServiceForm } from "../types";
 import { Icon } from "./Icon";
 
 type ServiceEditorModalProps = {
   busy: boolean;
   editorMode: "create" | "edit";
-  form: ServiceConfig;
+  form: ServiceForm;
   onClose: () => void;
   onSave: () => void;
-  onUpdateField: <K extends keyof ServiceConfig>(key: K, value: ServiceConfig[K]) => void;
+  onUpdateField: <K extends keyof ServiceForm>(key: K, value: ServiceForm[K]) => void;
   onApplyLogPaths: () => void;
   onPickDirectory: () => void;
   onPickLogDir: () => void;
@@ -111,7 +111,10 @@ export function ServiceEditorModal({
               type="number"
               min={1}
               value={form.restart_delay_seconds}
-              onChange={(event) => onUpdateField("restart_delay_seconds", Number(event.target.value))}
+              onChange={(event) => {
+                const { value, valueAsNumber } = event.currentTarget;
+                onUpdateField("restart_delay_seconds", value === "" || Number.isNaN(valueAsNumber) ? "" : valueAsNumber);
+              }}
             />
           </label>
 

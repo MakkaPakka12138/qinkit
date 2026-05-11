@@ -13,6 +13,7 @@ import type {
   ImportServicesResult,
   LogType,
   ServiceConfig,
+  ServiceForm,
   ServiceView,
   ThemeMode
 } from "./types";
@@ -39,7 +40,7 @@ export default function App() {
   const [editorOpen, setEditorOpen] = useState(false);
   const [editorMode, setEditorMode] = useState<"create" | "edit">("create");
   const [editingSourceId, setEditingSourceId] = useState("");
-  const [form, setForm] = useState<ServiceConfig>(() => blankForm());
+  const [form, setForm] = useState<ServiceForm>(() => blankForm());
   const [logModalOpen, setLogModalOpen] = useState(false);
   const [logServiceId, setLogServiceId] = useState("");
   const [activeLogType, setActiveLogType] = useState<LogType>("stdout");
@@ -62,8 +63,6 @@ export default function App() {
     () => services.find((service) => service.id === logServiceId) ?? null,
     [services, logServiceId]
   );
-  const runningCount = useMemo(() => services.filter((service) => service.running).length, [services]);
-  const enabledCount = useMemo(() => services.filter((service) => service.enabled).length, [services]);
   const activeLogPath = useMemo(() => {
     if (!logService) return "";
     return activeLogType === "stdout" ? logService.stdout_log : logService.stderr_log;
@@ -71,8 +70,10 @@ export default function App() {
   const selectedServiceIdSet = useMemo(() => new Set(selectedServiceIds), [selectedServiceIds]);
   const selectedCount = selectedServiceIds.length;
   const allSelected = services.length > 0 && selectedCount === services.length;
-  const groupedServices = useMemo<ServiceGroupSection[]>(() => {
+  const { groupedServices, runningCount, enabledCount } = useMemo(() => {
     const groups = new Map<string, ServiceGroupSection>();
+    let runningCount = 0;
+    let enabledCount = 0;
 
     for (const service of services) {
       const key = service.group_name.trim();
@@ -90,9 +91,11 @@ export default function App() {
 
       current.services.push(service);
       if (service.running) {
+        runningCount += 1;
         current.runningCount += 1;
       }
       if (service.enabled) {
+        enabledCount += 1;
         current.enabledCount += 1;
         current.startableIds.push(service.id);
       }
@@ -100,7 +103,11 @@ export default function App() {
       groups.set(key, current);
     }
 
-    return Array.from(groups.values());
+    return {
+      groupedServices: Array.from(groups.values()),
+      runningCount,
+      enabledCount
+    };
   }, [services]);
 
   useEffect(() => {
@@ -222,18 +229,19 @@ export default function App() {
   }
 
   function applyServiceList(list: ServiceView[]) {
+    const serviceIdSet = new Set(list.map((item) => item.id));
     setServices(list);
-    setSelectedServiceIds((current) => current.filter((id) => list.some((item) => item.id === id)));
+    setSelectedServiceIds((current) => current.filter((id) => serviceIdSet.has(id)));
 
     const currentLogServiceId = logServiceIdRef.current;
-    if (currentLogServiceId && !list.some((item) => item.id === currentLogServiceId)) {
+    if (currentLogServiceId && !serviceIdSet.has(currentLogServiceId)) {
       setLogModalOpen(false);
       setLogServiceId("");
       setLogText("");
     }
   }
 
-  function updateFormField<K extends keyof ServiceConfig>(key: K, value: ServiceConfig[K]) {
+  function updateFormField<K extends keyof ServiceForm>(key: K, value: ServiceForm[K]) {
     setForm((current) => ({ ...current, [key]: value }));
   }
 
@@ -430,6 +438,8 @@ export default function App() {
       }
 
       flash(formatBatchNotice(actionLabel, result), result.failed_count > 0);
+    } catch (error) {
+      flash(String(error), true);
     } finally {
       setBusy(false);
     }
