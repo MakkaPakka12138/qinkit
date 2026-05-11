@@ -70,6 +70,7 @@ export default function App() {
   }, [activeLogType, logService]);
   const selectedServiceIdSet = useMemo(() => new Set(selectedServiceIds), [selectedServiceIds]);
   const selectedCount = selectedServiceIds.length;
+  const allSelected = services.length > 0 && selectedCount === services.length;
   const groupedServices = useMemo<ServiceGroupSection[]>(() => {
     const groups = new Map<string, ServiceGroupSection>();
 
@@ -290,6 +291,17 @@ export default function App() {
 
   function clearSelectedServices() {
     setSelectedServiceIds([]);
+  }
+
+  function toggleSelectAllServices() {
+    if (servicesRef.current.length === 0) {
+      return;
+    }
+    if (selectedServiceIds.length === servicesRef.current.length) {
+      clearSelectedServices();
+      return;
+    }
+    selectAllServices();
   }
 
   function applyLogPaths() {
@@ -753,29 +765,29 @@ export default function App() {
             serviceCount={services.length}
             runningCount={runningCount}
             enabledCount={enabledCount}
-            selectedCount={selectedCount}
             busy={busy}
             notice={notice}
             errorText={errorText}
             closeToTray={closeToTray}
             onRefresh={() => void refresh(false)}
             onImport={() => void importConfig()}
-            onCreate={openCreateModal}
             onStartAll={() => void startAll()}
             onStopAll={() => void stopAll()}
             onRestartAll={() => void restartAll()}
-            onSelectAll={selectAllServices}
-            onClearSelection={clearSelectedServices}
-            onStartSelected={() => void startSelected()}
-            onStopSelected={() => void stopSelected()}
-            onRestartSelected={() => void restartSelected()}
             onToggleCloseToTray={() => setCloseToTray((current) => !current)}
           />
 
           <ServiceList
             groups={groupedServices}
             busy={busy}
+            selectedCount={selectedCount}
+            allSelected={allSelected}
             selectedServiceIds={selectedServiceIdSet}
+            onCreate={openCreateModal}
+            onToggleSelectAll={toggleSelectAllServices}
+            onStartSelected={() => void startSelected()}
+            onStopSelected={() => void stopSelected()}
+            onRestartSelected={() => void restartSelected()}
             onToggleSelected={toggleSelectedService}
             onStartGroup={(groupKey) => void startGroup(groupKey)}
             onCopy={openCopyModal}

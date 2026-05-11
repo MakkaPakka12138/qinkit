@@ -12,7 +12,14 @@ export type ServiceGroupSection = {
 type ServiceListProps = {
   groups: ServiceGroupSection[];
   busy: boolean;
+  selectedCount: number;
+  allSelected: boolean;
   selectedServiceIds: Set<string>;
+  onCreate: () => void;
+  onToggleSelectAll: () => void;
+  onStartSelected: () => void;
+  onStopSelected: () => void;
+  onRestartSelected: () => void;
   onToggleSelected: (id: string) => void;
   onStartGroup: (groupKey: string) => void;
   onCopy: (service: ServiceView) => void;
@@ -26,7 +33,14 @@ type ServiceListProps = {
 export function ServiceList({
   groups,
   busy,
+  selectedCount,
+  allSelected,
   selectedServiceIds,
+  onCreate,
+  onToggleSelectAll,
+  onStartSelected,
+  onStopSelected,
+  onRestartSelected,
   onToggleSelected,
   onStartGroup,
   onCopy,
@@ -42,10 +56,33 @@ export function ServiceList({
         <div>
           <h2>服务列表</h2>
         </div>
+        <div className="board__actions">
+          <span className="board__summary">{selectedCount} 项已选中</span>
+          <button type="button" className="primary compact-btn" disabled={busy} onClick={onCreate}>
+            新增
+          </button>
+          <button
+            type="button"
+            className="ghost soft compact-btn"
+            disabled={busy || groups.length === 0}
+            onClick={onToggleSelectAll}
+          >
+            {allSelected ? "清空选择" : "全选"}
+          </button>
+          <button type="button" className="primary compact-btn" disabled={busy || selectedCount === 0} onClick={onStartSelected}>
+            启动选中
+          </button>
+          <button type="button" className="ghost soft compact-btn" disabled={busy || selectedCount === 0} onClick={onStopSelected}>
+            关闭选中
+          </button>
+          <button type="button" className="primary alt compact-btn" disabled={busy || selectedCount === 0} onClick={onRestartSelected}>
+            重启选中
+          </button>
+        </div>
       </div>
 
       <div className="service-list">
-        {groups.length === 0 ? <div className="empty">还没有服务，先从上面的新增开始。</div> : null}
+        {groups.length === 0 ? <div className="empty">还没有服务，先新增一个服务。</div> : null}
 
         {groups.map((group) => (
           <section key={group.key} className="service-group">
