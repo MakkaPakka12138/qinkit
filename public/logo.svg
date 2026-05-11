@@ -1,5 +1,31 @@
-<svg width="128" height="128" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <rect width="128" height="128" rx="32" fill="#4969F5"/>
-  <path d="M40 68L58 86L90 42" stroke="white" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
-  <circle cx="37" cy="40" r="8" fill="white" opacity="0.75"/>
+<svg width="96" height="96" viewBox="0 0 96 96" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="qinkitBlue" x1="14" y1="12" x2="71" y2="77" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#1F8BFF"/>
+      <stop offset="1" stop-color="#1E63D9"/>
+    </linearGradient>
+    <linearGradient id="qinkitTeal" x1="52" y1="28" x2="84" y2="69" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#25C9D4"/>
+      <stop offset="1" stop-color="#20B8C4"/>
+    </linearGradient>
+  </defs>
+
+  <path
+    d="M30 12H61C73.703 12 84 22.2975 84 35V42.5L70.2 56.3C66.343 48.919 58.623 43.9 49.73 43.9C36.957 43.9 26.6 54.2572 26.6 67.03C26.6 72.54 28.528 77.6 31.745 81.57H30C17.2975 81.57 7 71.2725 7 58.57V35C7 22.2975 17.2975 12 30 12Z"
+    fill="url(#qinkitBlue)"
+  />
+
+  <circle cx="47.4" cy="50.4" r="17.8" fill="white"/>
+
+  <path d="M27.2 43.8H46.6" stroke="url(#qinkitBlue)" stroke-width="3.6" stroke-linecap="round"/>
+  <circle cx="49.8" cy="43.8" r="4.6" fill="url(#qinkitBlue)"/>
+  <path d="M23.9 54.6H46.4" stroke="url(#qinkitTeal)" stroke-width="3.6" stroke-linecap="round"/>
+  <circle cx="49.7" cy="54.6" r="4.6" fill="url(#qinkitTeal)"/>
+  <path d="M27.2 65.4H46.6" stroke="url(#qinkitBlue)" stroke-width="3.6" stroke-linecap="round"/>
+  <circle cx="49.8" cy="65.4" r="4.6" fill="url(#qinkitBlue)"/>
+
+  <path
+    d="M70.5 28.5L84 15V25.8L70.1 39.8L84 53.8V64.6L65.1 45.7L84 64.6V81H71.7L52.7 61.8L65.9 48.6L52.7 35.4L71.7 16.2H84V32.6L70.5 46.2"
+    fill="url(#qinkitTeal)"
+  />
 </svg>

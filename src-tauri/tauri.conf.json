@@ -1,6 +1,6 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "轻启服务管理器",
+  "productName": "轻启·服务管理器",
   "version": "0.1.0",
   "identifier": "com.makabaka.lite-service-manager",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "轻启服务管理器",
+        "title": "轻启·服务管理器",
         "width": 1160,
         "height": 780,
         "minWidth": 980,

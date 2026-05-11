@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { confirm, open } from "@tauri-apps/plugin-dialog";
 import { useEffect, useMemo, useRef, useState } from "react";
+import logoPng from "./assets/logo.png";
 
 type ServiceConfig = {
   id: string;
@@ -23,8 +24,10 @@ type ServiceView = ServiceConfig & {
 };
 
 type LogType = "stdout" | "stderr";
+type ThemeMode = "light" | "dark";
 
 const appWindow = getCurrentWindow();
+const THEME_STORAGE_KEY = "lite-service-manager-theme";
 
 function Icon({ path }: { path: string }) {
   return (
@@ -96,13 +99,11 @@ export default function App() {
   const logViewRef = useRef<HTMLPreElement | null>(null);
   const titlebarDragTimerRef = useRef<number | null>(null);
   const servicesRef = useRef<ServiceView[]>([]);
-  const selectedIdRef = useRef("");
   const logServiceIdRef = useRef("");
   const activeLogTypeRef = useRef<LogType>("stdout");
   const noticeTimerRef = useRef<number | undefined>(undefined);
 
   const [services, setServices] = useState<ServiceView[]>([]);
-  const [selectedId, setSelectedId] = useState("");
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const [errorText, setErrorText] = useState("");
@@ -117,6 +118,13 @@ export default function App() {
   const [windowMaximized, setWindowMaximized] = useState(false);
   const [mousePosition, setMousePosition] = useState({ x: 80, y: 80 });
   const [glowVisible, setGlowVisible] = useState(false);
+  const [themeMode, setThemeMode] = useState<ThemeMode>(() => {
+    const saved = window.localStorage.getItem(THEME_STORAGE_KEY);
+    if (saved === "light" || saved === "dark") {
+      return saved;
+    }
+    return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  });
 
   const logService = useMemo(
     () => services.find((service) => service.id === logServiceId) ?? null,
@@ -134,16 +142,19 @@ export default function App() {
   }, [services]);
 
   useEffect(() => {
-    selectedIdRef.current = selectedId;
-  }, [selectedId]);
-
-  useEffect(() => {
     logServiceIdRef.current = logServiceId;
   }, [logServiceId]);
 
   useEffect(() => {
     activeLogTypeRef.current = activeLogType;
   }, [activeLogType]);
+
+  useEffect(() => {
+    void appWindow.setIcon(logoPng).catch(() => undefined);
+    document.documentElement.dataset.theme = themeMode;
+    document.documentElement.style.colorScheme = themeMode;
+    window.localStorage.setItem(THEME_STORAGE_KEY, themeMode);
+  }, [themeMode]);
 
   useEffect(() => {
     void refresh(true);
@@ -218,13 +229,6 @@ export default function App() {
       const list = await invoke<ServiceView[]>("list_services");
       setServices(list);
 
-      const currentSelectedId = selectedIdRef.current;
-      if (!currentSelectedId && list.length > 0) {
-        setSelectedId(list[0].id);
-      } else if (currentSelectedId && !list.some((item) => item.id === currentSelectedId)) {
-        setSelectedId(list[0]?.id ?? "");
-      }
-
       const currentLogServiceId = logServiceIdRef.current;
       if (currentLogServiceId && !list.some((item) => item.id === currentLogServiceId)) {
         setLogModalOpen(false);
@@ -242,10 +246,6 @@ export default function App() {
     setForm((current) => ({ ...current, [key]: value }));
   }
 
-  function selectService(service: ServiceView) {
-    setSelectedId(service.id);
-  }
-
   function openCreateModal() {
     const next = blankForm();
     setEditorMode("create");
@@ -255,7 +255,6 @@ export default function App() {
   }
 
   function openEditModal(service: ServiceView) {
-    setSelectedId(service.id);
     setEditorMode("edit");
     setEditingSourceId(service.id);
     setForm(toServiceConfig(service));
@@ -296,7 +295,6 @@ export default function App() {
       }
 
       await invoke("save_services", { services: withoutSource });
-      setSelectedId(item.id);
       setEditorOpen(false);
       await refresh(true);
       flash(editorMode === "create" ? "服务已新增。" : "服务已更新。");
@@ -399,10 +397,6 @@ export default function App() {
         .filter((item) => item.id !== id)
         .map((item) => toServiceConfig(item));
       await invoke("save_services", { services: nextServices });
-
-      if (selectedIdRef.current === id) {
-        setSelectedId(nextServices[0]?.id ?? "");
-      }
       if (logServiceIdRef.current === id) {
         setLogModalOpen(false);
         setLogServiceId("");
@@ -450,7 +444,6 @@ export default function App() {
   }
 
   function openLogModal(service: ServiceView, type: LogType = "stdout") {
-    setSelectedId(service.id);
     setLogServiceId(service.id);
     setActiveLogType(type);
     setLogText("");
@@ -587,6 +580,10 @@ export default function App() {
     }
   }
 
+  function toggleThemeMode() {
+    setThemeMode((current) => (current === "dark" ? "light" : "dark"));
+  }
+
   return (
     <main ref={shellRef} className="shell">
       <div className="app-frame">
@@ -603,41 +600,55 @@ export default function App() {
           }}
         >
           <div className="titlebar__drag">
-            <div className="brand-mark">轻</div>
+            <div className="brand-mark">
+              <img src={logoPng} alt="Qinkit logo" className="brand-mark__image" />
+            </div>
             <div className="brand-copy">
-              <strong>轻启服务管理器</strong>
-              <span>PowerShell Service Runner</span>
+              <strong>轻启·服务管理器</strong>
+              <span>Qinkit server runner</span>
             </div>
           </div>
 
-          <div className="window-actions">
+          <div className="titlebar__actions">
             <button
               type="button"
-              className="window-btn window-btn--minimize"
-              aria-label="最小化"
-              title="最小化"
-              onClick={() => void minimizeWindow()}
+              className="theme-toggle"
+              aria-label={themeMode === "dark" ? "切换到浅色主题" : "切换到暗色主题"}
+              title={themeMode === "dark" ? "切换到浅色主题" : "切换到暗色主题"}
+              onClick={toggleThemeMode}
             >
-              <span className="window-btn__glyph">−</span>
+              <Icon path={themeMode === "dark" ? "M12 3v2.2M12 18.8V21M4.9 4.9l1.5 1.5M17.6 17.6l1.5 1.5M3 12h2.2M18.8 12H21M4.9 19.1l1.5-1.5M17.6 6.4l1.5-1.5M12 7.2a4.8 4.8 0 1 0 0 9.6 4.8 4.8 0 0 0 0-9.6Z" : "M19 12.8A7 7 0 1 1 11.2 5a5.6 5.6 0 0 0 7.8 7.8Z"} />
             </button>
-            <button
-              type="button"
-              className="window-btn window-btn--maximize"
-              aria-label={windowMaximized ? "还原" : "最大化"}
-              title={windowMaximized ? "还原" : "最大化"}
-              onClick={() => void toggleWindowMaximize()}
-            >
-              <span className="window-btn__glyph">{windowMaximized ? "❐" : "□"}</span>
-            </button>
-            <button
-              type="button"
-              className="window-btn window-btn--close"
-              aria-label="关闭"
-              title="关闭"
-              onClick={() => void closeWindow()}
-            >
-              <span className="window-btn__glyph">×</span>
-            </button>
+
+            <div className="window-actions">
+              <button
+                type="button"
+                className="window-btn window-btn--minimize"
+                aria-label="最小化"
+                title="最小化"
+                onClick={() => void minimizeWindow()}
+              >
+                <span className="window-btn__glyph">−</span>
+              </button>
+              <button
+                type="button"
+                className="window-btn window-btn--maximize"
+                aria-label={windowMaximized ? "还原" : "最大化"}
+                title={windowMaximized ? "还原" : "最大化"}
+                onClick={() => void toggleWindowMaximize()}
+              >
+                <span className="window-btn__glyph">{windowMaximized ? "❐" : "□"}</span>
+              </button>
+              <button
+                type="button"
+                className="window-btn window-btn--close"
+                aria-label="关闭"
+                title="关闭"
+                onClick={() => void closeWindow()}
+              >
+                <span className="window-btn__glyph">×</span>
+              </button>
+            </div>
           </div>
         </header>
 
@@ -687,15 +698,8 @@ export default function App() {
               ) : null}
 
               {services.map((service) => (
-                <article
-                  key={service.id}
-                  className={`service-row${selectedId === service.id ? " is-selected" : ""}`}
-                >
-                  <button
-                    type="button"
-                    className="service-row__main"
-                    onClick={() => selectService(service)}
-                  >
+                <article key={service.id} className="service-row">
+                  <div className="service-row__main">
                     <div className="service-row__title">
                       <strong>{service.name}</strong>
                       <span className={`state${service.running ? " running" : ""}`}>
@@ -706,7 +710,7 @@ export default function App() {
                     <span className="service-row__sub">
                       {service.cwd || "未配置工作目录"} · {service.enabled ? "已启用" : "已禁用"}
                     </span>
-                  </button>
+                  </div>
 
                   <div className="service-row__actions">
                     <button type="button" disabled={busy} onClick={() => openEditModal(service)}>
