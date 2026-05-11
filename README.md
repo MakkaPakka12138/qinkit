@@ -1,21 +1,35 @@
-# 轻启服务管理器
+# 轻启·服务管理器
 
-一个基于 **Rust + Vue 3 + Tauri 2** 的 Windows 轻量命令托管器。
+一个基于 **React + Tauri 2 + Rust** 的 Windows 轻量服务运行器。
 
-它不是 Docker，也不是完整 Windows Service 替代品。  
-它做的事情很朴素：把你平时在 CMD 里输入的启动命令保存起来，然后一键启动、停止、重启、看日志、崩溃自动重启。
+它不是 Docker，也不是完整的 Windows Service 替代品。  
+它解决的是更直接的问题：把你平时手动执行的启动命令保存下来，然后在一个桌面界面里统一管理启动、停止、重启、日志和自动拉起。
 
-## 功能
+## 当前功能
 
 - 添加 / 编辑 / 删除服务
-- 启动 / 停止 / 重启服务
-- 批量启动启用服务
-- 批量停止运行服务
-- stdout / stderr 日志写入文件
-- 最近 500 行日志查看
+- 启动 / 停止 / 重启单个服务
+- 一键启动全部已启用服务
+- 启动时自动发现已有进程，尽量避免重复拉起
 - 软件启动后自动启动指定服务
-- 服务崩溃后自动重启
-- 使用 `taskkill /T /F` 尽量清理 Windows 子进程树
+- 服务异常退出后自动重启
+- 为每次启动自动生成新的 stdout / stderr 日志文件
+- 实时查看 stdout / stderr 日志
+- 自定义日志目录
+- 自定义无边框标题栏
+- 浅色 / 暗色主题切换
+
+## 适合场景
+
+- 本地开发环境常驻服务
+- Python / Node.js / Go / Java 等命令行项目启动托管
+- 内网工具、小型后台进程、本地代理或 tunnel 管理
+
+不太适合：
+
+- 严格的生产级服务编排
+- 多机部署
+- 无人值守、用户未登录时长期运行的系统级服务
 
 ## 环境要求
 
@@ -23,8 +37,8 @@ Windows 下建议准备：
 
 1. Node.js LTS
 2. Rust stable
-3. Visual Studio Build Tools，包含 C++ 桌面开发工具
-4. WebView2 Runtime，Windows 10/11 通常已有
+3. Visual Studio Build Tools
+4. WebView2 Runtime
 
 ## 开发运行
 
@@ -33,70 +47,84 @@ npm install
 npm run tauri:dev
 ```
 
-## 打包成 exe
+## 打包
 
 ```bash
 npm run tauri:build
 ```
 
-打包产物一般在：
+打包产物通常在：
 
 ```text
 src-tauri/target/release/bundle/
 ```
 
-通常会生成 NSIS 安装包和 MSI 安装包。
+默认会生成 NSIS 和 MSI 安装包。
 
 ## 使用方式
 
-比如你原来在 CMD 中输入：
+比如你原来在终端里手动执行：
 
 ```bat
 cd /d E:\project\backend
 .venv\Scripts\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-在软件里配置：
+在软件中可以配置为：
 
 ```text
+显示名称：
+ERP 后端
+
 启动命令：
 .venv\Scripts\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 工作目录：
 E:\project\backend
 
-stdout 日志：
-E:\project\backend\logs\backend.out.log
-
-stderr 日志：
-E:\project\backend\logs\backend.err.log
+日志目录：
+E:\project\backend\logs
 ```
 
-启动命令会通过：
+当前 Windows 下，启动命令会通过 `powershell.exe` 执行，并以无控制台窗口方式启动。
 
-```bat
-cmd.exe /C "<你的启动命令>"
-```
+## 配置说明
 
-执行。
+每个服务当前包含这些核心字段：
 
-## 注意
+- `name`：界面显示名称
+- `command`：实际启动命令
+- `cwd`：工作目录
+- `enabled`：是否启用
+- `auto_start`：打开软件后自动启动
+- `auto_restart`：异常退出后自动重启
+- `restart_delay_seconds`：自动重启延迟
+- `log_dir`：日志目录
 
-这版是轻量进程管理器，不是系统级 Windows Service。
+服务配置保存在 Tauri 的应用数据目录下，文件名为 `services.json`。
 
-也就是说：
+## 日志行为
 
-- 软件关闭后，不保证被它启动的服务还可被继续管理
-- 它适合开发机、本地工具、小型后台服务
-- 如果要“无人登录也长期运行”，后续需要加 Windows Service 模式或者配合任务计划程序开机启动本软件
+- 每次启动会生成新的日志文件
+- stdout / stderr 分开写入
+- 日志窗口默认轮询刷新
+- 当前实现更偏向“开发阶段可读性”，不是日志平台
 
-## 后续可加功能
+## 已知限制
+
+- “已有进程发现”仍然是基于命令行匹配，不是绝对可靠
+- 软件关闭后，已启动进程不一定还能继续被本软件追踪管理
+- 桌面快捷方式图标更新通常需要重新打包并重新安装
+- 当前没有托盘、开机自启、导入导出、环境变量编辑
+
+## 后续建议
 
 - 托盘运行
 - 开机自启
 - 服务分组
 - 环境变量编辑
-- 日志滚动策略
-- 服务状态端口探活
+- 端口探活 / 健康检查
+- 日志尾部增量读取
 - 导入 / 导出配置
-- 真正 Windows Service wrapper 模式
+- 更稳定的进程发现策略
+- Windows Service 模式
