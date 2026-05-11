@@ -1,11 +1,11 @@
 use crate::{
-    config::{
-        build_runtime_log_paths, load_services, open_append, update_runtime_logs,
-    },
+    config::{build_runtime_log_paths, load_services, open_append, update_runtime_logs},
     types::{RunningProcess, ServiceConfig, ServiceManager, SystemProcessInfo},
 };
 use std::{
     collections::HashMap,
+    fs::File,
+    io::{BufRead, BufReader, Read, Write},
     process::{Command, Stdio},
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -44,7 +44,10 @@ fn command_tokens(input: &str) -> Vec<String> {
     input
         .split(|ch: char| {
             ch.is_whitespace()
-                || matches!(ch, '"' | '\'' | '`' | '|' | '&' | ';' | '>' | '<' | '(' | ')')
+                || matches!(
+                    ch,
+                    '"' | '\'' | '`' | '|' | '&' | ';' | '>' | '<' | '(' | ')'
+                )
         })
         .filter_map(|part| {
             let token = part
@@ -203,9 +206,8 @@ pub(crate) fn sync_discovered_processes(
         .lock()
         .map_err(|_| "进程状态锁被污染。".to_string())?;
 
-    running.retain(|service_id, proc_info| {
-        proc_info.managed || discovered.contains_key(service_id)
-    });
+    running
+        .retain(|service_id, proc_info| proc_info.managed || discovered.contains_key(service_id));
 
     for (service_id, pid) in discovered {
         running
@@ -239,6 +241,81 @@ fn running_pid(manager: &ServiceManager, id: &str) -> Result<Option<u32>, String
         .lock()
         .map_err(|_| "进程状态锁被污染。".to_string())?;
     Ok(processes.get(id).map(|item| item.pid))
+}
+
+fn stderr_line_is_error(line: &[u8]) -> bool {
+    let text = String::from_utf8_lossy(line);
+
+    for (index, token) in text
+        .split(|ch: char| !ch.is_ascii_alphabetic())
+        .filter(|token| !token.is_empty())
+        .take(8)
+        .enumerate()
+    {
+        let token = token.to_ascii_lowercase();
+        match token.as_str() {
+            "err" | "error" | "fatal" | "ftl" | "panic" => return true,
+            "dbg" | "debug" | "inf" | "info" | "warn" | "warning" | "wrn" => {
+                return false;
+            }
+            _ if index >= 5 => break,
+            _ => {}
+        }
+    }
+
+    true
+}
+
+fn write_log_line(log: &Arc<Mutex<File>>, line: &[u8]) -> Result<(), String> {
+    let mut file = log.lock().map_err(|_| "日志文件锁被污染。".to_string())?;
+    file.write_all(line)
+        .and_then(|_| file.flush())
+        .map_err(|err| format!("写入日志失败: {err}"))
+}
+
+fn spawn_stdout_logger<R>(stream: R, stdout_log: Arc<Mutex<File>>)
+where
+    R: Read + Send + 'static,
+{
+    thread::spawn(move || {
+        let mut reader = BufReader::new(stream);
+        let mut line = Vec::new();
+
+        loop {
+            line.clear();
+            match reader.read_until(b'\n', &mut line) {
+                Ok(0) => break,
+                Ok(_) => {
+                    let _ = write_log_line(&stdout_log, &line);
+                }
+                Err(_) => break,
+            }
+        }
+    });
+}
+
+fn spawn_stderr_router<R>(stream: R, stdout_log: Arc<Mutex<File>>, stderr_log: Arc<Mutex<File>>)
+where
+    R: Read + Send + 'static,
+{
+    thread::spawn(move || {
+        let mut reader = BufReader::new(stream);
+        let mut line = Vec::new();
+
+        loop {
+            line.clear();
+            match reader.read_until(b'\n', &mut line) {
+                Ok(0) => break,
+                Ok(_) if stderr_line_is_error(&line) => {
+                    let _ = write_log_line(&stderr_log, &line);
+                }
+                Ok(_) => {
+                    let _ = write_log_line(&stdout_log, &line);
+                }
+                Err(_) => break,
+            }
+        }
+    });
 }
 
 pub(crate) fn start_service_from_config(
@@ -278,8 +355,8 @@ fn spawn_process(
 
     let (stdout_log, stderr_log) = build_runtime_log_paths(&service)?;
     let service = update_runtime_logs(app, &service.id, &stdout_log, &stderr_log)?;
-    let stdout = open_append(&service.stdout_log)?;
-    let stderr = open_append(&service.stderr_log)?;
+    let stdout_log_file = Arc::new(Mutex::new(open_append(&service.stdout_log)?));
+    let stderr_log_file = Arc::new(Mutex::new(open_append(&service.stderr_log)?));
 
     let mut cmd = if cfg!(target_os = "windows") {
         let mut command = Command::new("powershell.exe");
@@ -307,14 +384,21 @@ fn spawn_process(
         apply_windows_creation_flags(&mut cmd, CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP);
     }
 
-    let child = cmd
+    let mut child = cmd
         .stdin(Stdio::null())
-        .stdout(Stdio::from(stdout))
-        .stderr(Stdio::from(stderr))
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
         .spawn()
         .map_err(|err| format!("启动失败: {err}"))?;
 
     let pid = child.id();
+    if let Some(stdout) = child.stdout.take() {
+        spawn_stdout_logger(stdout, stdout_log_file.clone());
+    }
+    if let Some(stderr) = child.stderr.take() {
+        spawn_stderr_router(stderr, stdout_log_file, stderr_log_file);
+    }
+
     let child_ref = Arc::new(Mutex::new(child));
     let stop_requested = Arc::new(AtomicBool::new(false));
 
@@ -337,7 +421,10 @@ fn spawn_process(
     let watcher_service = service.clone();
     let watcher_app = app.clone();
     thread::spawn(move || {
-        let _ = child_ref.lock().ok().and_then(|mut child| child.wait().ok());
+        let _ = child_ref
+            .lock()
+            .ok()
+            .and_then(|mut child| child.wait().ok());
 
         if let Ok(mut processes) = watcher_manager.processes.lock() {
             processes.remove(&watcher_service.id);
@@ -423,5 +510,35 @@ pub(crate) fn auto_start_services(app: &AppHandle, manager: ServiceManager) {
         Err(err) => {
             eprintln!("自动启动服务失败: {err}");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::stderr_line_is_error;
+
+    #[test]
+    fn routes_cloudflared_info_and_warning_lines_to_stdout() {
+        assert!(!stderr_line_is_error(
+            b"2026-05-11T03:51:10Z INF Starting tunnel tunnelID=abc"
+        ));
+        assert!(!stderr_line_is_error(
+            br#"2026-05-11T03:51:17Z WRN Failed to dial a quic connection error="timeout""#
+        ));
+    }
+
+    #[test]
+    fn keeps_explicit_errors_in_stderr() {
+        assert!(stderr_line_is_error(
+            b"2026-05-11T03:51:17Z ERR Tunnel failed"
+        ));
+        assert!(stderr_line_is_error(b"Error: failed to start service"));
+    }
+
+    #[test]
+    fn keeps_unknown_stderr_lines_in_stderr() {
+        assert!(stderr_line_is_error(
+            b"stack trace line without a log level"
+        ));
     }
 }
