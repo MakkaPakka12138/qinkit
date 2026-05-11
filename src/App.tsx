@@ -89,6 +89,7 @@ function normalizeService(input: ServiceConfig): ServiceConfig {
 export default function App() {
   const shellRef = useRef<HTMLDivElement | null>(null);
   const workspaceRef = useRef<HTMLElement | null>(null);
+  const titlebarDragTimerRef = useRef<number | null>(null);
   const servicesRef = useRef<ServiceView[]>([]);
   const selectedIdRef = useRef("");
   const logServiceIdRef = useRef("");
@@ -513,12 +514,14 @@ export default function App() {
       return;
     }
 
-    try {
-      event.preventDefault();
-      await invoke("window_start_dragging");
-    } catch {
-      // ignore
+    if (titlebarDragTimerRef.current) {
+      window.clearTimeout(titlebarDragTimerRef.current);
     }
+
+    titlebarDragTimerRef.current = window.setTimeout(() => {
+      void invoke("window_start_dragging").catch(() => undefined);
+      titlebarDragTimerRef.current = null;
+    }, 50);
   }
 
   async function handleTitlebarDoubleClick(event: React.MouseEvent<HTMLElement>) {
@@ -527,10 +530,22 @@ export default function App() {
       return;
     }
 
+    if (titlebarDragTimerRef.current) {
+      window.clearTimeout(titlebarDragTimerRef.current);
+      titlebarDragTimerRef.current = null;
+    }
+
     try {
       await toggleWindowMaximize();
     } catch {
       // ignore
+    }
+  }
+
+  function clearPendingTitlebarDrag() {
+    if (titlebarDragTimerRef.current) {
+      window.clearTimeout(titlebarDragTimerRef.current);
+      titlebarDragTimerRef.current = null;
     }
   }
 
@@ -553,6 +568,8 @@ export default function App() {
           onMouseDownCapture={(event) => {
             void handleTitlebarMouseDown(event);
           }}
+          onMouseUpCapture={clearPendingTitlebarDrag}
+          onMouseLeave={clearPendingTitlebarDrag}
           onDoubleClickCapture={(event) => {
             void handleTitlebarDoubleClick(event);
           }}
