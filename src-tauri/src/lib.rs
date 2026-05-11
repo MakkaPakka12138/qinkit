@@ -1,0 +1,425 @@
+use serde::{Deserialize, Serialize};
+use std::{
+    collections::HashMap,
+    fs::{self, File, OpenOptions},
+    io::{BufRead, BufReader},
+    path::{Path, PathBuf},
+    process::{Command, Stdio},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
+    thread,
+    time::Duration,
+};
+use tauri::{AppHandle, Manager, State};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ServiceConfig {
+    id: String,
+    name: String,
+    command: String,
+    cwd: String,
+    enabled: bool,
+    auto_start: bool,
+    auto_restart: bool,
+    restart_delay_seconds: u64,
+    stdout_log: String,
+    stderr_log: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ServiceView {
+    id: String,
+    name: String,
+    command: String,
+    cwd: String,
+    enabled: bool,
+    auto_start: bool,
+    auto_restart: bool,
+    restart_delay_seconds: u64,
+    stdout_log: String,
+    stderr_log: String,
+    running: bool,
+    pid: Option<u32>,
+}
+
+struct RunningProcess {
+    pid: u32,
+    stop_requested: Arc<AtomicBool>,
+}
+
+#[derive(Clone, Default)]
+struct ServiceManager {
+    processes: Arc<Mutex<HashMap<String, RunningProcess>>>,
+}
+
+fn app_data_file(app: &AppHandle) -> Result<PathBuf, String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|err| format!("获取应用数据目录失败: {err}"))?;
+    fs::create_dir_all(&dir).map_err(|err| format!("创建应用数据目录失败: {err}"))?;
+    Ok(dir.join("services.json"))
+}
+
+fn load_services(app: &AppHandle) -> Result<Vec<ServiceConfig>, String> {
+    let file = app_data_file(app)?;
+    if !file.exists() {
+        fs::write(&file, "[]").map_err(|err| format!("初始化配置文件失败: {err}"))?;
+    }
+    let text = fs::read_to_string(&file).map_err(|err| format!("读取配置文件失败: {err}"))?;
+    serde_json::from_str::<Vec<ServiceConfig>>(&text).map_err(|err| {
+        format!(
+            "解析配置文件失败: {err}\n文件路径: {}",
+            file.to_string_lossy()
+        )
+    })
+}
+
+fn persist_services(app: &AppHandle, services: &[ServiceConfig]) -> Result<(), String> {
+    let file = app_data_file(app)?;
+    let text = serde_json::to_string_pretty(services)
+        .map_err(|err| format!("序列化配置失败: {err}"))?;
+    fs::write(&file, text).map_err(|err| format!("写入配置文件失败: {err}"))
+}
+
+fn ensure_parent(path: &str) -> Result<(), String> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return Ok(());
+    }
+    if let Some(parent) = Path::new(trimmed).parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent)
+                .map_err(|err| format!("创建日志目录失败 {}: {err}", parent.display()))?;
+        }
+    }
+    Ok(())
+}
+
+fn open_append(path: &str) -> Result<File, String> {
+    ensure_parent(path)?;
+    OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .map_err(|err| format!("打开日志文件失败 {path}: {err}"))
+}
+
+fn is_running(manager: &ServiceManager, id: &str) -> Result<bool, String> {
+    let processes = manager
+        .processes
+        .lock()
+        .map_err(|_| "进程状态锁被污染。Windows 都没这么阴间。".to_string())?;
+    Ok(processes.contains_key(id))
+}
+
+fn spawn_process(manager: ServiceManager, service: ServiceConfig) -> Result<u32, String> {
+    if service.id.trim().is_empty() {
+        return Err("服务 ID 不能为空。".to_string());
+    }
+    if service.command.trim().is_empty() {
+        return Err("启动命令不能为空。".to_string());
+    }
+    if is_running(&manager, &service.id)? {
+        let processes = manager
+            .processes
+            .lock()
+            .map_err(|_| "进程状态锁被污染。".to_string())?;
+        if let Some(running) = processes.get(&service.id) {
+            return Ok(running.pid);
+        }
+    }
+
+    let stdout = open_append(&service.stdout_log)?;
+    let stderr = open_append(&service.stderr_log)?;
+
+    let mut cmd = if cfg!(target_os = "windows") {
+        let mut command = Command::new("powershell.exe");
+        command
+            .arg("-NoProfile")
+            .arg("-ExecutionPolicy")
+            .arg("Bypass")
+            .arg("-Command")
+            .arg(&service.command);
+        command
+    } else {
+        let mut command = Command::new("sh");
+        command.arg("-lc").arg(&service.command);
+        command
+    };
+
+    if !service.cwd.trim().is_empty() {
+        cmd.current_dir(&service.cwd);
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        const CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
+        cmd.creation_flags(CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP);
+    }
+
+    let child = cmd
+        .stdin(Stdio::null())
+        .stdout(Stdio::from(stdout))
+        .stderr(Stdio::from(stderr))
+        .spawn()
+        .map_err(|err| format!("启动失败: {err}"))?;
+
+    let pid = child.id();
+    let child_ref = Arc::new(Mutex::new(child));
+    let stop_requested = Arc::new(AtomicBool::new(false));
+
+    {
+        let mut processes = manager
+            .processes
+            .lock()
+            .map_err(|_| "进程状态锁被污染。".to_string())?;
+        processes.insert(
+            service.id.clone(),
+            RunningProcess {
+                pid,
+                stop_requested: stop_requested.clone(),
+            },
+        );
+    }
+
+    let watcher_manager = manager.clone();
+    let watcher_service = service.clone();
+    thread::spawn(move || {
+        let _ = child_ref.lock().ok().and_then(|mut child| child.wait().ok());
+
+        if let Ok(mut processes) = watcher_manager.processes.lock() {
+            processes.remove(&watcher_service.id);
+        }
+
+        let should_restart = watcher_service.enabled
+            && watcher_service.auto_restart
+            && !stop_requested.load(Ordering::SeqCst);
+
+        if should_restart {
+            let delay = watcher_service.restart_delay_seconds.max(1);
+            thread::sleep(Duration::from_secs(delay));
+            let _ = spawn_process(watcher_manager, watcher_service);
+        }
+    });
+
+    Ok(pid)
+}
+
+#[cfg(target_os = "windows")]
+fn kill_process_tree(pid: u32) -> Result<(), String> {
+    let status = Command::new("taskkill")
+        .args(["/PID", &pid.to_string(), "/T", "/F"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map_err(|err| format!("调用 taskkill 失败: {err}"))?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("taskkill 执行失败，PID={pid}"))
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn kill_process_tree(pid: u32) -> Result<(), String> {
+    let status = Command::new("kill")
+        .args(["-TERM", &pid.to_string()])
+        .status()
+        .map_err(|err| format!("调用 kill 失败: {err}"))?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("kill 执行失败，PID={pid}"))
+    }
+}
+
+#[tauri::command]
+fn list_services(app: AppHandle, manager: State<'_, ServiceManager>) -> Result<Vec<ServiceView>, String> {
+    let services = load_services(&app)?;
+    let processes = manager
+        .processes
+        .lock()
+        .map_err(|_| "进程状态锁被污染。".to_string())?;
+
+    Ok(services
+        .into_iter()
+        .map(|svc| {
+            let running = processes.get(&svc.id);
+            ServiceView {
+                id: svc.id,
+                name: svc.name,
+                command: svc.command,
+                cwd: svc.cwd,
+                enabled: svc.enabled,
+                auto_start: svc.auto_start,
+                auto_restart: svc.auto_restart,
+                restart_delay_seconds: svc.restart_delay_seconds,
+                stdout_log: svc.stdout_log,
+                stderr_log: svc.stderr_log,
+                running: running.is_some(),
+                pid: running.map(|item| item.pid),
+            }
+        })
+        .collect())
+}
+
+#[tauri::command]
+fn save_services(app: AppHandle, services: Vec<ServiceConfig>) -> Result<(), String> {
+    persist_services(&app, &services)
+}
+
+#[tauri::command]
+fn start_service(
+    app: AppHandle,
+    manager: State<'_, ServiceManager>,
+    id: String,
+) -> Result<u32, String> {
+    let services = load_services(&app)?;
+    let service = services
+        .into_iter()
+        .find(|svc| svc.id == id)
+        .ok_or_else(|| format!("找不到服务: {id}"))?;
+
+    if !service.enabled {
+        return Err(format!("服务已禁用: {}", service.name));
+    }
+
+    spawn_process(manager.inner().clone(), service)
+}
+
+fn stop_service_inner(manager: ServiceManager, id: String) -> Result<(), String> {
+    let running = {
+        let mut processes = manager
+            .processes
+            .lock()
+            .map_err(|_| "进程状态锁被污染。".to_string())?;
+        processes.remove(&id)
+    };
+
+    if let Some(proc_info) = running {
+        proc_info.stop_requested.store(true, Ordering::SeqCst);
+        kill_process_tree(proc_info.pid)
+    } else {
+        Ok(())
+    }
+}
+
+#[tauri::command]
+fn stop_service(manager: State<'_, ServiceManager>, id: String) -> Result<(), String> {
+    stop_service_inner(manager.inner().clone(), id)
+}
+
+#[tauri::command]
+fn restart_service(
+    app: AppHandle,
+    manager: State<'_, ServiceManager>,
+    id: String,
+) -> Result<u32, String> {
+    let _ = stop_service_inner(manager.inner().clone(), id.clone());
+    thread::sleep(Duration::from_millis(600));
+    start_service(app, manager, id)
+}
+
+#[tauri::command]
+fn read_log(path: String, max_lines: usize) -> Result<String, String> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return Ok("日志路径为空。".to_string());
+    }
+
+    let file = File::open(trimmed).map_err(|err| format!("读取日志失败 {trimmed}: {err}"))?;
+    let reader = BufReader::new(file);
+    let lines: Vec<String> = reader.lines().map_while(Result::ok).collect();
+    let keep = max_lines.max(20);
+    let start = lines.len().saturating_sub(keep);
+    Ok(lines[start..].join("\n"))
+}
+
+#[tauri::command]
+fn open_path(path: String) -> Result<(), String> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return Err("路径为空。".to_string());
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let target = Path::new(trimmed);
+        let mut command = Command::new("explorer.exe");
+
+        if target.is_file() {
+            command.arg(format!("/select,{trimmed}"));
+        } else {
+            command.arg(trimmed);
+        }
+
+        command
+            .stdin(Stdio::null())
+            .spawn()
+            .map_err(|err| format!("打开路径失败: {err}"))?;
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        Command::new("open")
+            .arg(trimmed)
+            .spawn()
+            .map_err(|err| format!("打开路径失败: {err}"))?;
+    }
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        Command::new("xdg-open")
+            .arg(trimmed)
+            .spawn()
+            .map_err(|err| format!("打开路径失败: {err}"))?;
+    }
+
+    Ok(())
+}
+
+fn auto_start_services(app: &AppHandle, manager: ServiceManager) {
+    match load_services(app) {
+        Ok(services) => {
+            for service in services {
+                if service.enabled && service.auto_start {
+                    let _ = spawn_process(manager.clone(), service);
+                }
+            }
+        }
+        Err(err) => {
+            eprintln!("自动启动服务失败: {err}");
+        }
+    }
+}
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    tauri::Builder::default()
+        .manage(ServiceManager::default())
+        .plugin(tauri_plugin_dialog::init())
+        .setup(|app| {
+            let manager = app.state::<ServiceManager>().inner().clone();
+            auto_start_services(&app.handle(), manager);
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            list_services,
+            save_services,
+            start_service,
+            stop_service,
+            restart_service,
+            read_log,
+            open_path
+        ])
+        .run(tauri::generate_context!())
+        .expect("error while running lite service manager");
+}
