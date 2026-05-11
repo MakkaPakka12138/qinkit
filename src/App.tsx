@@ -25,6 +25,14 @@ type LogType = "stdout" | "stderr";
 
 const appWindow = getCurrentWindow();
 
+function Icon({ path }: { path: string }) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className="icon">
+      <path d={path} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 function toServiceConfig(service: ServiceConfig | ServiceView): ServiceConfig {
   const { id, name, command, cwd, enabled, auto_start, auto_restart, restart_delay_seconds, stdout_log, stderr_log } =
     service;
@@ -513,6 +521,19 @@ export default function App() {
     }
   }
 
+  async function handleTitlebarDoubleClick(event: React.MouseEvent<HTMLElement>) {
+    const target = event.target as HTMLElement;
+    if (target.closest("button, input, textarea, select, a")) {
+      return;
+    }
+
+    try {
+      await toggleWindowMaximize();
+    } catch {
+      // ignore
+    }
+  }
+
   function handleWorkspacePointerMove(event: React.MouseEvent<HTMLElement>) {
     const rect = workspaceRef.current?.getBoundingClientRect();
     if (!rect) return;
@@ -532,13 +553,11 @@ export default function App() {
           onMouseDownCapture={(event) => {
             void handleTitlebarMouseDown(event);
           }}
+          onDoubleClickCapture={(event) => {
+            void handleTitlebarDoubleClick(event);
+          }}
         >
-          <div
-            className="titlebar__drag"
-            onDoubleClick={() => {
-              void toggleWindowMaximize();
-            }}
-          >
+          <div className="titlebar__drag">
             <div className="brand-mark">轻</div>
             <div className="brand-copy">
               <strong>轻启服务管理器</strong>
@@ -654,14 +673,14 @@ export default function App() {
 
       {editorOpen ? (
         <div className="modal-mask" onClick={closeEditor}>
-          <section className="modal" onClick={(event) => event.stopPropagation()}>
+          <section className="modal modal--editor" onClick={(event) => event.stopPropagation()}>
             <div className="modal__head">
               <div>
                 <h3>{editorMode === "create" ? "新增服务" : "编辑服务"}</h3>
                 <p>启动命令会通过 PowerShell 运行。</p>
               </div>
-              <button type="button" className="ghost" onClick={closeEditor}>
-                关闭
+              <button type="button" className="ghost icon-btn" title="关闭" aria-label="关闭" onClick={closeEditor}>
+                <Icon path="M6 6l12 12M18 6L6 18" />
               </button>
             </div>
 
@@ -690,14 +709,14 @@ export default function App() {
                 <span>工作目录</span>
                 <div className="field-actions">
                   <input value={form.cwd} onChange={(event) => updateFormField("cwd", event.target.value)} placeholder="E:\\project\\backend" />
-                  <button type="button" onClick={() => void pickDirectory()}>
-                    选择
+                  <button type="button" className="icon-btn" title="选择目录" aria-label="选择目录" onClick={() => void pickDirectory()}>
+                    <Icon path="M4 7.5h5l2 2H20v7.5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zM4 7.5V6a2 2 0 0 1 2-2h3l2 2" />
                   </button>
-                  <button type="button" onClick={applyLogPaths}>
-                    生成日志路径
+                  <button type="button" className="icon-btn" title="生成日志路径" aria-label="生成日志路径" onClick={applyLogPaths}>
+                    <Icon path="M12 3l1.8 4.7L19 9.5l-4 3.2 1.2 5.3L12 15.2 7.8 18l1.2-5.3-4-3.2 5.2-1.8z" />
                   </button>
-                  <button type="button" disabled={!form.cwd.trim()} onClick={() => void openPath(form.cwd)}>
-                    打开
+                  <button type="button" className="icon-btn" title="打开目录" aria-label="打开目录" disabled={!form.cwd.trim()} onClick={() => void openPath(form.cwd)}>
+                    <Icon path="M14 5h5v5M10 14 19 5M19 14v4a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h4" />
                   </button>
                 </div>
               </label>
@@ -706,11 +725,11 @@ export default function App() {
                 <span>stdout 日志</span>
                 <div className="field-actions">
                   <input value={form.stdout_log} onChange={(event) => updateFormField("stdout_log", event.target.value)} placeholder="E:\\project\\backend\\logs\\backend.out.log" />
-                  <button type="button" onClick={() => void pickLogFile("stdout_log")}>
-                    选择
+                  <button type="button" className="icon-btn" title="选择 stdout 日志" aria-label="选择 stdout 日志" onClick={() => void pickLogFile("stdout_log")}>
+                    <Icon path="M4 7.5h5l2 2H20v7.5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zM4 7.5V6a2 2 0 0 1 2-2h3l2 2" />
                   </button>
-                  <button type="button" disabled={!form.stdout_log.trim()} onClick={() => void openPath(form.stdout_log)}>
-                    打开
+                  <button type="button" className="icon-btn" title="打开 stdout 日志" aria-label="打开 stdout 日志" disabled={!form.stdout_log.trim()} onClick={() => void openPath(form.stdout_log)}>
+                    <Icon path="M14 5h5v5M10 14 19 5M19 14v4a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h4" />
                   </button>
                 </div>
               </label>
@@ -719,11 +738,11 @@ export default function App() {
                 <span>stderr 日志</span>
                 <div className="field-actions">
                   <input value={form.stderr_log} onChange={(event) => updateFormField("stderr_log", event.target.value)} placeholder="E:\\project\\backend\\logs\\backend.err.log" />
-                  <button type="button" onClick={() => void pickLogFile("stderr_log")}>
-                    选择
+                  <button type="button" className="icon-btn" title="选择 stderr 日志" aria-label="选择 stderr 日志" onClick={() => void pickLogFile("stderr_log")}>
+                    <Icon path="M4 7.5h5l2 2H20v7.5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zM4 7.5V6a2 2 0 0 1 2-2h3l2 2" />
                   </button>
-                  <button type="button" disabled={!form.stderr_log.trim()} onClick={() => void openPath(form.stderr_log)}>
-                    打开
+                  <button type="button" className="icon-btn" title="打开 stderr 日志" aria-label="打开 stderr 日志" disabled={!form.stderr_log.trim()} onClick={() => void openPath(form.stderr_log)}>
+                    <Icon path="M14 5h5v5M10 14 19 5M19 14v4a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h4" />
                   </button>
                 </div>
               </label>
@@ -767,11 +786,11 @@ export default function App() {
             </div>
 
             <div className="modal__foot">
-              <button type="button" className="ghost" onClick={closeEditor}>
-                取消
+              <button type="button" className="ghost icon-btn" title="取消" aria-label="取消" onClick={closeEditor}>
+                <Icon path="M6 6l12 12M18 6L6 18" />
               </button>
-              <button type="button" className="primary" disabled={busy} onClick={() => void saveCurrent()}>
-                保存
+              <button type="button" className="primary icon-btn" title="保存" aria-label="保存" disabled={busy} onClick={() => void saveCurrent()}>
+                <Icon path="M5 5h11l3 3v11a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1zM8 5v5h8M8 19v-6h8v6" />
               </button>
             </div>
           </section>
