@@ -8,6 +8,8 @@ use std::{
 pub(crate) struct ServiceConfig {
     pub(crate) id: String,
     pub(crate) name: String,
+    #[serde(default)]
+    pub(crate) group_name: String,
     pub(crate) command: String,
     pub(crate) cwd: String,
     pub(crate) enabled: bool,
@@ -26,6 +28,7 @@ pub(crate) struct ServiceConfig {
 pub(crate) struct ServiceView {
     pub(crate) id: String,
     pub(crate) name: String,
+    pub(crate) group_name: String,
     pub(crate) command: String,
     pub(crate) cwd: String,
     pub(crate) enabled: bool,

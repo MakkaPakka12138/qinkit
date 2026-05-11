@@ -1,11 +1,12 @@
 import type { ServiceConfig, ServiceView } from "../types";
 
 export function toServiceConfig(service: ServiceConfig | ServiceView): ServiceConfig {
-  const { id, name, command, cwd, enabled, auto_start, auto_restart, restart_delay_seconds, log_dir, stdout_log, stderr_log } =
+  const { id, name, group_name, command, cwd, enabled, auto_start, auto_restart, restart_delay_seconds, log_dir, stdout_log, stderr_log } =
     service;
   return {
     id,
     name,
+    group_name,
     command,
     cwd,
     enabled,
@@ -29,6 +30,7 @@ export function blankForm(): ServiceConfig {
   return {
     id,
     name: "新服务",
+    group_name: "",
     command: "",
     cwd: "",
     enabled: true,
@@ -47,6 +49,7 @@ export function normalizeService(input: ServiceConfig): ServiceConfig {
     ...input,
     id,
     name: input.name.trim() || id,
+    group_name: input.group_name.trim(),
     command: input.command.trim(),
     cwd: input.cwd.trim(),
     log_dir: input.log_dir.trim(),

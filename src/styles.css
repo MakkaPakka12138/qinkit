@@ -477,11 +477,6 @@ textarea:focus {
   flex-wrap: wrap;
 }
 
-.action-strip--secondary {
-  padding-top: 10px;
-  border-top: 1px solid var(--panel-border);
-}
-
 .stats-bar {
   display: flex;
   flex-wrap: wrap;
@@ -508,17 +503,6 @@ textarea:focus {
   min-width: 0;
 }
 
-.selection-bar {
-  display: flex;
-  align-items: center;
-  min-height: 32px;
-}
-
-.selection-bar span {
-  color: var(--muted);
-  font-size: 13px;
-}
-
 .board {
   margin-top: 18px;
   padding: 18px 20px 20px;
@@ -530,6 +514,20 @@ textarea:focus {
   justify-content: space-between;
   gap: 16px;
   margin-bottom: 14px;
+}
+
+.board__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
+}
+
+.board__summary {
+  color: var(--muted);
+  font-size: 13px;
+  white-space: nowrap;
 }
 
 .board__head h2,
@@ -567,6 +565,51 @@ textarea:focus {
   flex-direction: column;
   gap: 10px;
   min-height: 420px;
+}
+
+.service-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border: 1px solid var(--service-row-border);
+  border-radius: 22px;
+  background: var(--service-row-bg);
+  padding: 12px;
+}
+
+.service-group__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 2px 8px;
+}
+
+.service-group__title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.service-group__title strong {
+  font-size: 15px;
+}
+
+.service-group__title span {
+  border: 1px solid var(--stats-border);
+  border-radius: 999px;
+  background: var(--stats-bg);
+  color: var(--stats-text);
+  padding: 5px 10px;
+  font-size: 12px;
+}
+
+.service-group__body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
 .service-row {
@@ -919,6 +962,11 @@ textarea:focus {
     align-items: stretch;
   }
 
+  .service-group__head {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
   .service-row {
     grid-template-columns: auto minmax(0, 1fr);
   }
@@ -931,6 +979,10 @@ textarea:focus {
   .board__head {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .board__actions {
+    justify-content: flex-start;
   }
 
   .titlebar {

@@ -6,7 +6,7 @@ import logoPng from "./assets/logo.png";
 import { ActionPanel } from "./components/ActionPanel";
 import { LogModal } from "./components/LogModal";
 import { ServiceEditorModal } from "./components/ServiceEditorModal";
-import { ServiceList } from "./components/ServiceList";
+import { ServiceList, type ServiceGroupSection } from "./components/ServiceList";
 import { Titlebar } from "./components/Titlebar";
 import type {
   BatchServiceResult,
@@ -70,6 +70,38 @@ export default function App() {
   }, [activeLogType, logService]);
   const selectedServiceIdSet = useMemo(() => new Set(selectedServiceIds), [selectedServiceIds]);
   const selectedCount = selectedServiceIds.length;
+  const allSelected = services.length > 0 && selectedCount === services.length;
+  const groupedServices = useMemo<ServiceGroupSection[]>(() => {
+    const groups = new Map<string, ServiceGroupSection>();
+
+    for (const service of services) {
+      const key = service.group_name.trim();
+      const label = key || "未分组";
+      const current =
+        groups.get(key) ??
+        {
+          key,
+          label,
+          services: [],
+          runningCount: 0,
+          enabledCount: 0,
+          startableIds: []
+        };
+
+      current.services.push(service);
+      if (service.running) {
+        current.runningCount += 1;
+      }
+      if (service.enabled) {
+        current.enabledCount += 1;
+        current.startableIds.push(service.id);
+      }
+
+      groups.set(key, current);
+    }
+
+    return Array.from(groups.values());
+  }, [services]);
 
   useEffect(() => {
     servicesRef.current = services;
@@ -259,6 +291,17 @@ export default function App() {
 
   function clearSelectedServices() {
     setSelectedServiceIds([]);
+  }
+
+  function toggleSelectAllServices() {
+    if (servicesRef.current.length === 0) {
+      return;
+    }
+    if (selectedServiceIds.length === servicesRef.current.length) {
+      clearSelectedServices();
+      return;
+    }
+    selectAllServices();
   }
 
   function applyLogPaths() {
@@ -680,6 +723,16 @@ export default function App() {
     setThemeMode((current) => (current === "dark" ? "light" : "dark"));
   }
 
+  async function startGroup(groupKey: string) {
+    const targetGroup = groupedServices.find((group) => group.key === groupKey);
+    await runBatchAction(
+      "start_services",
+      targetGroup?.startableIds ?? [],
+      "当前分组没有可启动的已启用服务。",
+      `启动分组「${targetGroup?.label ?? "未命名"}」`
+    );
+  }
+
   return (
     <main ref={shellRef} className="shell">
       <div className="app-frame">
@@ -712,30 +765,31 @@ export default function App() {
             serviceCount={services.length}
             runningCount={runningCount}
             enabledCount={enabledCount}
-            selectedCount={selectedCount}
             busy={busy}
             notice={notice}
             errorText={errorText}
             closeToTray={closeToTray}
             onRefresh={() => void refresh(false)}
             onImport={() => void importConfig()}
-            onCreate={openCreateModal}
             onStartAll={() => void startAll()}
             onStopAll={() => void stopAll()}
             onRestartAll={() => void restartAll()}
-            onSelectAll={selectAllServices}
-            onClearSelection={clearSelectedServices}
-            onStartSelected={() => void startSelected()}
-            onStopSelected={() => void stopSelected()}
-            onRestartSelected={() => void restartSelected()}
             onToggleCloseToTray={() => setCloseToTray((current) => !current)}
           />
 
           <ServiceList
-            services={services}
+            groups={groupedServices}
             busy={busy}
+            selectedCount={selectedCount}
+            allSelected={allSelected}
             selectedServiceIds={selectedServiceIdSet}
+            onCreate={openCreateModal}
+            onToggleSelectAll={toggleSelectAllServices}
+            onStartSelected={() => void startSelected()}
+            onStopSelected={() => void stopSelected()}
+            onRestartSelected={() => void restartSelected()}
             onToggleSelected={toggleSelectedService}
+            onStartGroup={(groupKey) => void startGroup(groupKey)}
             onCopy={openCopyModal}
             onEdit={openEditModal}
             onToggle={(service) => void toggleService(service)}

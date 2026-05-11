@@ -50,6 +50,15 @@ export function ServiceEditorModal({
             <input value={form.name} onChange={(event) => onUpdateField("name", event.target.value)} placeholder="ERP 后端" />
           </label>
 
+          <label>
+            <span>分组名称</span>
+            <input
+              value={form.group_name}
+              onChange={(event) => onUpdateField("group_name", event.target.value)}
+              placeholder="本地开发"
+            />
+          </label>
+
           <label className="wide">
             <span>启动命令</span>
             <textarea
