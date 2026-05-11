@@ -166,7 +166,7 @@ pub(crate) fn restart_service(
     manager: State<'_, ServiceManager>,
     id: String,
 ) -> Result<u32, String> {
-    let _ = stop_service_inner(manager.inner().clone(), id.clone());
+    stop_service_inner(manager.inner().clone(), id.clone())?;
     start_service(app, manager, id)
 }
 
@@ -324,7 +324,17 @@ pub(crate) fn restart_services(
             continue;
         }
 
-        let _ = stop_service_inner(manager.inner().clone(), id.clone());
+        if let Err(error) = stop_service_inner(manager.inner().clone(), id.clone()) {
+            failed_count += 1;
+            items.push(BatchServiceItemResult {
+                id: id.clone(),
+                status: "error".to_string(),
+                pid: None,
+                error: Some(error),
+            });
+            continue;
+        }
+
         match start_service_from_config(&app, manager.inner().clone(), service.clone()) {
             Ok(pid) => {
                 succeeded_count += 1;
