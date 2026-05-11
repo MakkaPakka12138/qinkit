@@ -12,6 +12,7 @@ import type {
   BatchServiceResult,
   ImportServicesResult,
   LogType,
+  MoveDirection,
   ServiceConfig,
   ServiceForm,
   ServiceView,
@@ -243,6 +244,62 @@ export default function App() {
 
   function updateFormField<K extends keyof ServiceForm>(key: K, value: ServiceForm[K]) {
     setForm((current) => ({ ...current, [key]: value }));
+  }
+
+  function movedIndex(index: number, direction: MoveDirection) {
+    return direction === "up" ? index - 1 : index + 1;
+  }
+
+  function reorderItem<T>(items: T[], index: number, direction: MoveDirection) {
+    const targetIndex = movedIndex(index, direction);
+    if (index < 0 || targetIndex < 0 || targetIndex >= items.length) {
+      return null;
+    }
+
+    const next = [...items];
+    [next[index], next[targetIndex]] = [next[targetIndex], next[index]];
+    return next;
+  }
+
+  function flattenServiceGroups(groups: ServiceGroupSection[]) {
+    return groups.flatMap((group) => group.services.map((service) => toServiceConfig(service)));
+  }
+
+  async function saveServiceOrder(nextServices: ServiceConfig[], message: string) {
+    setBusy(true);
+    try {
+      await invoke("save_services", { services: nextServices });
+      await refresh(true);
+      flash(message);
+    } catch (error) {
+      flash(String(error), true);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function moveGroup(groupKey: string, direction: MoveDirection) {
+    const groupIndex = groupedServices.findIndex((group) => group.key === groupKey);
+    const nextGroups = reorderItem(groupedServices, groupIndex, direction);
+    if (!nextGroups) return;
+
+    await saveServiceOrder(flattenServiceGroups(nextGroups), "分组顺序已更新。");
+  }
+
+  async function moveService(serviceId: string, direction: MoveDirection) {
+    const groupIndex = groupedServices.findIndex((group) =>
+      group.services.some((service) => service.id === serviceId)
+    );
+    if (groupIndex < 0) return;
+
+    const serviceIndex = groupedServices[groupIndex].services.findIndex((service) => service.id === serviceId);
+    const nextServices = reorderItem(groupedServices[groupIndex].services, serviceIndex, direction);
+    if (!nextServices) return;
+
+    const nextGroups = groupedServices.map((group, index) =>
+      index === groupIndex ? { ...group, services: nextServices } : group
+    );
+    await saveServiceOrder(flattenServiceGroups(nextGroups), "服务顺序已更新。");
   }
 
   function openCreateModal() {
@@ -800,6 +857,8 @@ export default function App() {
             onRestartSelected={() => void restartSelected()}
             onToggleSelected={toggleSelectedService}
             onStartGroup={(groupKey) => void startGroup(groupKey)}
+            onMoveGroup={(groupKey, direction) => void moveGroup(groupKey, direction)}
+            onMoveService={(serviceId, direction) => void moveService(serviceId, direction)}
             onCopy={openCopyModal}
             onEdit={openEditModal}
             onToggle={(service) => void toggleService(service)}

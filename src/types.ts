@@ -46,4 +46,5 @@ export type BatchServiceResult = {
 };
 
 export type LogType = "stdout" | "stderr";
+export type MoveDirection = "up" | "down";
 export type ThemeMode = "light" | "dark";

@@ -1,4 +1,5 @@
-import type { ServiceView } from "../types";
+import type { MoveDirection, ServiceView } from "../types";
+import { Icon } from "./Icon";
 
 export type ServiceGroupSection = {
   key: string;
@@ -22,6 +23,8 @@ type ServiceListProps = {
   onRestartSelected: () => void;
   onToggleSelected: (id: string) => void;
   onStartGroup: (groupKey: string) => void;
+  onMoveGroup: (groupKey: string, direction: MoveDirection) => void;
+  onMoveService: (serviceId: string, direction: MoveDirection) => void;
   onCopy: (service: ServiceView) => void;
   onEdit: (service: ServiceView) => void;
   onToggle: (service: ServiceView) => void;
@@ -43,6 +46,8 @@ export function ServiceList({
   onRestartSelected,
   onToggleSelected,
   onStartGroup,
+  onMoveGroup,
+  onMoveService,
   onCopy,
   onEdit,
   onToggle,
@@ -84,7 +89,7 @@ export function ServiceList({
       <div className="service-list">
         {groups.length === 0 ? <div className="empty">还没有服务，先新增一个服务。</div> : null}
 
-        {groups.map((group) => (
+        {groups.map((group, groupIndex) => (
           <section key={group.key} className="service-group">
             <header className="service-group__head">
               <div className="service-group__title">
@@ -93,18 +98,40 @@ export function ServiceList({
                 <span>{group.runningCount} 运行中</span>
                 <span>{group.enabledCount} 已启用</span>
               </div>
-              <button
-                type="button"
-                className="primary compact-btn"
-                disabled={busy || group.startableIds.length === 0}
-                onClick={() => onStartGroup(group.key)}
-              >
-                启动本组
-              </button>
+              <div className="service-group__actions">
+                <button
+                  type="button"
+                  className="icon-compact-btn"
+                  title="上移分组"
+                  aria-label="上移分组"
+                  disabled={busy || groupIndex === 0}
+                  onClick={() => onMoveGroup(group.key, "up")}
+                >
+                  <Icon path="m18 15-6-6-6 6" />
+                </button>
+                <button
+                  type="button"
+                  className="icon-compact-btn"
+                  title="下移分组"
+                  aria-label="下移分组"
+                  disabled={busy || groupIndex === groups.length - 1}
+                  onClick={() => onMoveGroup(group.key, "down")}
+                >
+                  <Icon path="m6 9 6 6 6-6" />
+                </button>
+                <button
+                  type="button"
+                  className="primary compact-btn"
+                  disabled={busy || group.startableIds.length === 0}
+                  onClick={() => onStartGroup(group.key)}
+                >
+                  启动本组
+                </button>
+              </div>
             </header>
 
             <div className="service-group__body">
-              {group.services.map((service) => (
+              {group.services.map((service, serviceIndex) => (
                 <article
                   key={service.id}
                   className={`service-row${selectedServiceIds.has(service.id) ? " is-selected" : ""}`}
@@ -131,6 +158,26 @@ export function ServiceList({
                   </div>
 
                   <div className="service-row__actions">
+                    <button
+                      type="button"
+                      className="icon-compact-btn"
+                      title="上移服务"
+                      aria-label="上移服务"
+                      disabled={busy || serviceIndex === 0}
+                      onClick={() => onMoveService(service.id, "up")}
+                    >
+                      <Icon path="m18 15-6-6-6 6" />
+                    </button>
+                    <button
+                      type="button"
+                      className="icon-compact-btn"
+                      title="下移服务"
+                      aria-label="下移服务"
+                      disabled={busy || serviceIndex === group.services.length - 1}
+                      onClick={() => onMoveService(service.id, "down")}
+                    >
+                      <Icon path="m6 9 6 6 6-6" />
+                    </button>
                     <button type="button" className="compact-btn" disabled={busy} onClick={() => onCopy(service)}>
                       复制
                     </button>
