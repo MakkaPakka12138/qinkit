@@ -98,15 +98,51 @@ button.ghost.soft {
 }
 
 button.window-btn {
-  min-width: 34px;
-  min-height: 28px;
-  border-radius: 8px;
-  border-color: #eceef4;
-  padding-inline: 0;
-  background: #f5f6fa;
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
+  min-height: 24px;
+  border-radius: 7px;
+  border-color: #e6e9f0;
+  padding: 0;
+  background: #ffffff;
+  color: #60677a;
+  box-shadow: 0 1px 2px rgba(20, 28, 45, 0.05);
 }
 
-button.window-btn.danger:hover:not(:disabled),
+button.window-btn:hover:not(:disabled),
+button.window-btn:focus-visible {
+  background: #f6f8fc;
+  border-color: #d8dde7;
+  color: #2f3545;
+}
+
+button.window-btn:focus-visible {
+  outline: 2px solid rgba(31, 36, 48, 0.18);
+  outline-offset: 2px;
+}
+
+.window-btn__glyph {
+  font-size: 11px;
+  line-height: 1;
+  font-weight: 600;
+  transform: translateY(-0.5px);
+}
+
+button.window-btn--close {
+  color: #5a6173;
+}
+
+button.window-btn--minimize {
+  color: #5a6173;
+}
+
+button.window-btn--maximize {
+  color: #5a6173;
+}
+
 button.danger-text:hover:not(:disabled) {
   color: var(--danger);
   border-color: #f1bfca;
@@ -221,10 +257,12 @@ textarea:focus {
 
 .window-actions {
   display: flex;
-  gap: 10px;
+  gap: 8px;
   position: relative;
   z-index: 2;
   flex-shrink: 0;
+  align-items: center;
+  padding-right: 2px;
 }
 
 .window-actions,

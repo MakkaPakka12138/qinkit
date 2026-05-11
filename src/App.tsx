@@ -333,6 +333,19 @@ export default function App() {
     }
   }
 
+  async function restartService(id: string) {
+    setBusy(true);
+    try {
+      await invoke("restart_service", { id });
+      await refresh(true);
+      flash("服务已重启。");
+    } catch (error) {
+      flash(String(error), true);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function toggleService(service: ServiceView) {
     if (service.running) {
       await stopService(service.id);
@@ -500,9 +513,14 @@ export default function App() {
 
   async function closeWindow() {
     try {
-      await invoke("window_close");
+      await appWindow.hide();
+      await appWindow.destroy();
     } catch {
-      // ignore
+      try {
+        await invoke("window_close");
+      } catch {
+        // ignore
+      }
     }
   }
 
@@ -593,14 +611,32 @@ export default function App() {
           </div>
 
           <div className="window-actions">
-            <button type="button" className="window-btn" onClick={() => void minimizeWindow()}>
-              _
+            <button
+              type="button"
+              className="window-btn window-btn--minimize"
+              aria-label="最小化"
+              title="最小化"
+              onClick={() => void minimizeWindow()}
+            >
+              <span className="window-btn__glyph">−</span>
             </button>
-            <button type="button" className="window-btn" onClick={() => void toggleWindowMaximize()}>
-              {windowMaximized ? "❐" : "□"}
+            <button
+              type="button"
+              className="window-btn window-btn--maximize"
+              aria-label={windowMaximized ? "还原" : "最大化"}
+              title={windowMaximized ? "还原" : "最大化"}
+              onClick={() => void toggleWindowMaximize()}
+            >
+              <span className="window-btn__glyph">{windowMaximized ? "❐" : "□"}</span>
             </button>
-            <button type="button" className="window-btn danger" onClick={() => void closeWindow()}>
-              ×
+            <button
+              type="button"
+              className="window-btn window-btn--close"
+              aria-label="关闭"
+              title="关闭"
+              onClick={() => void closeWindow()}
+            >
+              <span className="window-btn__glyph">×</span>
             </button>
           </div>
         </header>
@@ -678,6 +714,9 @@ export default function App() {
                     </button>
                     <button type="button" disabled={busy} onClick={() => void toggleService(service)}>
                       {service.running ? "停止" : "启动"}
+                    </button>
+                    <button type="button" disabled={busy} onClick={() => void restartService(service.id)}>
+                      重启
                     </button>
                     <button type="button" disabled={busy} onClick={() => openLogModal(service)}>
                       日志

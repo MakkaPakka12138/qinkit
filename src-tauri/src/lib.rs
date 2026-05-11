@@ -52,11 +52,21 @@ struct ServiceView {
 struct RunningProcess {
     pid: u32,
     stop_requested: Arc<AtomicBool>,
+    managed: bool,
 }
 
 #[derive(Clone, Default)]
 struct ServiceManager {
     processes: Arc<Mutex<HashMap<String, RunningProcess>>>,
+}
+
+#[cfg(target_os = "windows")]
+#[derive(Debug, Deserialize)]
+struct SystemProcessInfo {
+    #[serde(rename = "ProcessId")]
+    process_id: u32,
+    #[serde(rename = "CommandLine")]
+    command_line: Option<String>,
 }
 
 fn app_data_file(app: &AppHandle) -> Result<PathBuf, String> {
@@ -217,6 +227,225 @@ fn is_running(manager: &ServiceManager, id: &str) -> Result<bool, String> {
     Ok(processes.contains_key(id))
 }
 
+#[cfg(target_os = "windows")]
+fn apply_windows_creation_flags(command: &mut Command, flags: u32) {
+    use std::os::windows::process::CommandExt;
+    command.creation_flags(flags);
+}
+
+#[cfg(target_os = "windows")]
+fn normalize_command_text(input: &str) -> String {
+    input
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_ascii_lowercase()
+}
+
+#[cfg(target_os = "windows")]
+fn significant_command_tokens(input: &str) -> Vec<String> {
+    input
+        .split(|ch: char| {
+            ch.is_whitespace()
+                || matches!(ch, '"' | '\'' | '`' | '|' | '&' | ';' | '>' | '<' | '(' | ')')
+        })
+        .filter_map(|part| {
+            let token = part
+                .trim_matches(|ch: char| matches!(ch, '"' | '\'' | '`' | ',' | '[' | ']'))
+                .trim();
+            if token.is_empty() || matches!(token, "|" | "&" | "&&" | "||" | ";" | ">") {
+                None
+            } else {
+                Some(token.to_ascii_lowercase())
+            }
+        })
+        .collect()
+}
+
+#[cfg(target_os = "windows")]
+fn process_match_score(service: &ServiceConfig, process: &SystemProcessInfo) -> usize {
+    let process_command = match &process.command_line {
+        Some(command) if !command.trim().is_empty() => normalize_command_text(command),
+        _ => return 0,
+    };
+    let service_command = normalize_command_text(&service.command);
+    if service_command.is_empty() || process_command.is_empty() {
+        return 0;
+    }
+    if process.process_id == std::process::id() {
+        return 0;
+    }
+
+    if process_command.contains(&service_command) {
+        return 10_000 + service_command.len();
+    }
+
+    let tokens = significant_command_tokens(&service.command);
+    if tokens.is_empty() {
+        return 0;
+    }
+
+    let first_token = &tokens[0];
+    if !process_command.contains(first_token) {
+        return 0;
+    }
+
+    let matched_count = tokens
+        .iter()
+        .filter(|token| process_command.contains(token.as_str()))
+        .count();
+    let required_matches = match tokens.len() {
+        0 => 0,
+        1 => 1,
+        2 => 2,
+        _ => 3,
+    };
+
+    if matched_count < required_matches {
+        return 0;
+    }
+
+    100 + matched_count
+}
+
+#[cfg(target_os = "windows")]
+fn parse_system_processes(json: &str) -> Result<Vec<SystemProcessInfo>, String> {
+    let trimmed = json.trim();
+    if trimmed.is_empty() || trimmed == "null" {
+        return Ok(Vec::new());
+    }
+
+    let value = serde_json::from_str::<serde_json::Value>(trimmed)
+        .map_err(|err| format!("解析系统进程列表失败: {err}"))?;
+
+    match value {
+        serde_json::Value::Array(items) => items
+            .into_iter()
+            .map(serde_json::from_value::<SystemProcessInfo>)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|err| format!("解析系统进程项失败: {err}")),
+        serde_json::Value::Object(_) => serde_json::from_value::<SystemProcessInfo>(value)
+            .map(|item| vec![item])
+            .map_err(|err| format!("解析系统进程项失败: {err}")),
+        _ => Ok(Vec::new()),
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn list_system_processes() -> Result<Vec<SystemProcessInfo>, String> {
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+    let script = "$ErrorActionPreference='Stop'; Get-CimInstance Win32_Process | Select-Object ProcessId,CommandLine | ConvertTo-Json -Compress";
+    let mut command = Command::new("powershell.exe");
+    command
+        .arg("-NoProfile")
+        .arg("-NonInteractive")
+        .arg("-ExecutionPolicy")
+        .arg("Bypass")
+        .arg("-Command")
+        .arg(script)
+        .stdin(Stdio::null())
+        .stderr(Stdio::null());
+    apply_windows_creation_flags(&mut command, CREATE_NO_WINDOW);
+
+    let output = command
+        .output()
+        .map_err(|err| format!("获取系统进程失败: {err}"))?;
+
+    if !output.status.success() {
+        return Ok(Vec::new());
+    }
+
+    parse_system_processes(&String::from_utf8_lossy(&output.stdout))
+}
+
+#[cfg(target_os = "windows")]
+fn sync_discovered_processes(
+    manager: &ServiceManager,
+    services: &[ServiceConfig],
+) -> Result<(), String> {
+    let processes = match list_system_processes() {
+        Ok(items) => items,
+        Err(_) => return Ok(()),
+    };
+
+    let discovered = services
+        .iter()
+        .filter_map(|service| {
+            if service.command.trim().is_empty() {
+                return None;
+            }
+
+            processes
+                .iter()
+                .filter_map(|process| {
+                    let score = process_match_score(service, process);
+                    if score == 0 {
+                        None
+                    } else {
+                        Some((score, process.process_id))
+                    }
+                })
+                .max_by_key(|(score, pid)| (*score, *pid))
+                .map(|(_, pid)| (service.id.clone(), pid))
+        })
+        .collect::<HashMap<_, _>>();
+
+    let mut running = manager
+        .processes
+        .lock()
+        .map_err(|_| "进程状态锁被污染。".to_string())?;
+
+    running.retain(|service_id, proc_info| proc_info.managed || discovered.contains_key(service_id));
+
+    for (service_id, pid) in discovered {
+        running
+            .entry(service_id)
+            .and_modify(|proc_info| {
+                if !proc_info.managed {
+                    proc_info.pid = pid;
+                }
+            })
+            .or_insert_with(|| RunningProcess {
+                pid,
+                stop_requested: Arc::new(AtomicBool::new(false)),
+                managed: false,
+            });
+    }
+
+    Ok(())
+}
+
+#[cfg(not(target_os = "windows"))]
+fn sync_discovered_processes(
+    _manager: &ServiceManager,
+    _services: &[ServiceConfig],
+) -> Result<(), String> {
+    Ok(())
+}
+
+fn running_pid(manager: &ServiceManager, id: &str) -> Result<Option<u32>, String> {
+    let processes = manager
+        .processes
+        .lock()
+        .map_err(|_| "进程状态锁被污染。".to_string())?;
+    Ok(processes.get(id).map(|item| item.pid))
+}
+
+fn start_service_from_config(
+    app: &AppHandle,
+    manager: ServiceManager,
+    service: ServiceConfig,
+) -> Result<u32, String> {
+    sync_discovered_processes(&manager, std::slice::from_ref(&service))?;
+
+    if let Some(pid) = running_pid(&manager, &service.id)? {
+        return Ok(pid);
+    }
+
+    spawn_process(app, manager, service)
+}
+
 fn spawn_process(
     app: &AppHandle,
     manager: ServiceManager,
@@ -264,10 +493,9 @@ fn spawn_process(
 
     #[cfg(target_os = "windows")]
     {
-        use std::os::windows::process::CommandExt;
         const CREATE_NO_WINDOW: u32 = 0x08000000;
         const CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
-        cmd.creation_flags(CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP);
+        apply_windows_creation_flags(&mut cmd, CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP);
     }
 
     let child = cmd
@@ -291,6 +519,7 @@ fn spawn_process(
             RunningProcess {
                 pid,
                 stop_requested: stop_requested.clone(),
+                managed: true,
             },
         );
     }
@@ -321,11 +550,17 @@ fn spawn_process(
 
 #[cfg(target_os = "windows")]
 fn kill_process_tree(pid: u32) -> Result<(), String> {
-    let status = Command::new("taskkill")
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+    let mut command = Command::new("taskkill");
+    command
         .args(["/PID", &pid.to_string(), "/T", "/F"])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(Stdio::null());
+    apply_windows_creation_flags(&mut command, CREATE_NO_WINDOW);
+
+    let status = command
         .status()
         .map_err(|err| format!("调用 taskkill 失败: {err}"))?;
 
@@ -353,6 +588,7 @@ fn kill_process_tree(pid: u32) -> Result<(), String> {
 #[tauri::command]
 fn list_services(app: AppHandle, manager: State<'_, ServiceManager>) -> Result<Vec<ServiceView>, String> {
     let services = load_services(&app)?;
+    sync_discovered_processes(manager.inner(), &services)?;
     let processes = manager
         .processes
         .lock()
@@ -406,7 +642,7 @@ fn start_service(
         return Err(format!("服务已禁用: {}", service.name));
     }
 
-    spawn_process(&app, manager.inner().clone(), service)
+    start_service_from_config(&app, manager.inner().clone(), service)
 }
 
 fn stop_service_inner(manager: ServiceManager, id: String) -> Result<(), String> {
@@ -438,7 +674,6 @@ fn restart_service(
     id: String,
 ) -> Result<u32, String> {
     let _ = stop_service_inner(manager.inner().clone(), id.clone());
-    thread::sleep(Duration::from_millis(600));
     start_service(app, manager, id)
 }
 
@@ -528,6 +763,7 @@ fn window_toggle_maximize(window: Window) -> Result<bool, String> {
 
 #[tauri::command]
 fn window_close(window: Window) -> Result<(), String> {
+    let _ = window.hide();
     window.close().map_err(|err| format!("关闭窗口失败: {err}"))
 }
 
@@ -543,7 +779,7 @@ fn auto_start_services(app: &AppHandle, manager: ServiceManager) {
         Ok(services) => {
             for service in services {
                 if service.enabled && service.auto_start {
-                    let _ = spawn_process(app, manager.clone(), service);
+                    let _ = start_service_from_config(app, manager.clone(), service);
                 }
             }
         }
