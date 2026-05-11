@@ -12,7 +12,7 @@ use std::{
     thread,
     time::Duration,
 };
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Manager, State, Window};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ServiceConfig {
@@ -386,6 +386,44 @@ fn open_path(path: String) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+fn window_minimize(window: Window) -> Result<(), String> {
+    window
+        .minimize()
+        .map_err(|err| format!("窗口最小化失败: {err}"))
+}
+
+#[tauri::command]
+fn window_toggle_maximize(window: Window) -> Result<bool, String> {
+    let is_maximized = window
+        .is_maximized()
+        .map_err(|err| format!("读取窗口状态失败: {err}"))?;
+
+    if is_maximized {
+        window
+            .unmaximize()
+            .map_err(|err| format!("窗口还原失败: {err}"))?;
+        Ok(false)
+    } else {
+        window
+            .maximize()
+            .map_err(|err| format!("窗口放大失败: {err}"))?;
+        Ok(true)
+    }
+}
+
+#[tauri::command]
+fn window_close(window: Window) -> Result<(), String> {
+    window.close().map_err(|err| format!("关闭窗口失败: {err}"))
+}
+
+#[tauri::command]
+fn window_start_dragging(window: Window) -> Result<(), String> {
+    window
+        .start_dragging()
+        .map_err(|err| format!("窗口拖动失败: {err}"))
+}
+
 fn auto_start_services(app: &AppHandle, manager: ServiceManager) {
     match load_services(app) {
         Ok(services) => {
@@ -418,7 +456,11 @@ pub fn run() {
             stop_service,
             restart_service,
             read_log,
-            open_path
+            open_path,
+            window_minimize,
+            window_toggle_maximize,
+            window_close,
+            window_start_dragging
         ])
         .run(tauri::generate_context!())
         .expect("error while running lite service manager");

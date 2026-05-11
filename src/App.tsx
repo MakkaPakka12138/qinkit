@@ -80,6 +80,7 @@ function normalizeService(input: ServiceConfig): ServiceConfig {
 
 export default function App() {
   const shellRef = useRef<HTMLDivElement | null>(null);
+  const workspaceRef = useRef<HTMLElement | null>(null);
   const servicesRef = useRef<ServiceView[]>([]);
   const selectedIdRef = useRef("");
   const logServiceIdRef = useRef("");
@@ -100,12 +101,9 @@ export default function App() {
   const [activeLogType, setActiveLogType] = useState<LogType>("stdout");
   const [logText, setLogText] = useState("");
   const [windowMaximized, setWindowMaximized] = useState(false);
-  const [mousePosition, setMousePosition] = useState({ x: 220, y: 120 });
+  const [mousePosition, setMousePosition] = useState({ x: 80, y: 80 });
+  const [glowVisible, setGlowVisible] = useState(false);
 
-  const selectedService = useMemo(
-    () => services.find((service) => service.id === selectedId) ?? null,
-    [services, selectedId]
-  );
   const logService = useMemo(
     () => services.find((service) => service.id === logServiceId) ?? null,
     [services, logServiceId]
@@ -175,9 +173,8 @@ export default function App() {
     };
   }, [activeLogType, logModalOpen, logServiceId]);
 
-  const pointerStyle = {
-    ["--mouse-x" as string]: `${mousePosition.x}px`,
-    ["--mouse-y" as string]: `${mousePosition.y}px`
+  const cursorGlowStyle = {
+    transform: `translate(${mousePosition.x - 44}px, ${mousePosition.y - 44}px)`
   } as React.CSSProperties;
 
   function flash(message: string, isError = false) {
@@ -477,16 +474,49 @@ export default function App() {
 
   async function toggleWindowMaximize() {
     try {
-      await appWindow.toggleMaximize();
-      setWindowMaximized(await appWindow.isMaximized());
+      const next = await invoke<boolean>("window_toggle_maximize");
+      setWindowMaximized(next);
     } catch {
       // ignore
     }
   }
 
-  function handleShellPointerMove(event: React.MouseEvent<HTMLDivElement>) {
-    const rect = shellRef.current?.getBoundingClientRect();
+  async function minimizeWindow() {
+    try {
+      await invoke("window_minimize");
+    } catch {
+      // ignore
+    }
+  }
+
+  async function closeWindow() {
+    try {
+      await invoke("window_close");
+    } catch {
+      // ignore
+    }
+  }
+
+  async function handleTitlebarMouseDown(event: React.MouseEvent<HTMLElement>) {
+    if (event.button !== 0) return;
+
+    const target = event.target as HTMLElement;
+    if (target.closest("button, input, textarea, select, a")) {
+      return;
+    }
+
+    try {
+      event.preventDefault();
+      await invoke("window_start_dragging");
+    } catch {
+      // ignore
+    }
+  }
+
+  function handleWorkspacePointerMove(event: React.MouseEvent<HTMLElement>) {
+    const rect = workspaceRef.current?.getBoundingClientRect();
     if (!rect) return;
+
     setMousePosition({
       x: event.clientX - rect.left,
       y: event.clientY - rect.top
@@ -494,116 +524,131 @@ export default function App() {
   }
 
   return (
-    <main
-      ref={shellRef}
-      className="shell"
-      style={pointerStyle}
-      onMouseMove={handleShellPointerMove}
-    >
-      <div className="chrome">
-        <header className="titlebar">
+    <main ref={shellRef} className="shell">
+      <div className="app-frame">
+        <header
+          className="titlebar"
+          data-tauri-drag-region=""
+          onMouseDownCapture={(event) => {
+            void handleTitlebarMouseDown(event);
+          }}
+        >
           <div
             className="titlebar__drag"
-            data-tauri-drag-region=""
             onDoubleClick={() => {
               void toggleWindowMaximize();
             }}
           >
-            <p className="titlebar__eyebrow">Lite Service Manager</p>
-            <div className="titlebar__headline">
-              <h1>轻启服务管理器</h1>
-              <span>{services.length} 个服务</span>
-              <span>{runningCount} 运行中</span>
-              <span>{enabledCount} 已启用</span>
-              <span>PowerShell 执行</span>
+            <div className="brand-mark">轻</div>
+            <div className="brand-copy">
+              <strong>轻启服务管理器</strong>
+              <span>PowerShell Service Runner</span>
             </div>
           </div>
 
-          <div className="titlebar__actions">
-            <button type="button" className="ghost" disabled={busy} onClick={() => void refresh(false)}>
-              刷新
+          <div className="window-actions">
+            <button type="button" className="window-btn" onClick={() => void minimizeWindow()}>
+              _
             </button>
-            <button type="button" className="primary" disabled={busy} onClick={openCreateModal}>
-              新增
+            <button type="button" className="window-btn" onClick={() => void toggleWindowMaximize()}>
+              {windowMaximized ? "❐" : "□"}
             </button>
-            <button type="button" className="primary alt" disabled={busy} onClick={() => void startAll()}>
-              一键启动
+            <button type="button" className="window-btn danger" onClick={() => void closeWindow()}>
+              ×
             </button>
-            <div className="window-actions">
-              <button type="button" className="window-btn" onClick={() => void appWindow.minimize()}>
-                _
-              </button>
-              <button type="button" className="window-btn" onClick={() => void toggleWindowMaximize()}>
-                {windowMaximized ? "❐" : "□"}
-              </button>
-              <button type="button" className="window-btn danger" onClick={() => void appWindow.close()}>
-                ×
-              </button>
-            </div>
           </div>
         </header>
 
-        <section className="board">
-          <div className="board__head">
-            <div>
-              <h2>服务列表</h2>
-              <p>点击行查看状态，编辑与新增使用弹窗，日志窗口自动跟随最新输出。</p>
-            </div>
-            {selectedService ? (
-              <div className="board__focus">
-                <strong>{selectedService.name}</strong>
-                <span>{selectedService.running ? `运行中 · PID ${selectedService.pid ?? "-"}` : "未运行"}</span>
+        <section
+          ref={workspaceRef}
+          className="workspace"
+          onMouseMove={handleWorkspacePointerMove}
+          onMouseEnter={() => setGlowVisible(true)}
+          onMouseLeave={() => setGlowVisible(false)}
+        >
+          <div className={`cursor-glow${glowVisible ? " is-visible" : ""}`} style={cursorGlowStyle} />
+          <section className="action-panel">
+            <div className="action-strip">
+              <div className="stats-bar">
+                <span>{services.length} 个服务</span>
+                <span>{runningCount} 运行中</span>
+                <span>{enabledCount} 已启用</span>
               </div>
-            ) : null}
-          </div>
-
-          {notice ? <div className="notice notice--good">{notice}</div> : null}
-          {errorText ? <div className="notice notice--bad">{errorText}</div> : null}
-
-          <div className="service-list">
-            {services.length === 0 ? (
-              <div className="empty">还没有服务，先从右上角新增。</div>
-            ) : null}
-
-            {services.map((service) => (
-              <article
-                key={service.id}
-                className={`service-row${selectedId === service.id ? " is-selected" : ""}`}
-              >
-                <button
-                  type="button"
-                  className="service-row__main"
-                  onClick={() => selectService(service)}
-                >
-                  <div className="service-row__title">
-                    <strong>{service.name}</strong>
-                    <span className={`state${service.running ? " running" : ""}`}>
-                      {service.running ? `运行中 #${service.pid ?? "-"}` : "未运行"}
-                    </span>
-                  </div>
-                  <span className="service-row__meta">{service.command || "未配置启动命令"}</span>
-                  <span className="service-row__sub">
-                    {service.cwd || "未配置工作目录"} · {service.enabled ? "已启用" : "已禁用"}
-                  </span>
+              <div className="action-strip__buttons">
+                <button type="button" className="ghost soft" disabled={busy} onClick={() => void refresh(false)}>
+                  刷新
                 </button>
+                <button type="button" className="primary" disabled={busy} onClick={openCreateModal}>
+                  新增
+                </button>
+                <button type="button" className="primary alt" disabled={busy} onClick={() => void startAll()}>
+                  一键启动
+                </button>
+              </div>
+            </div>
 
-                <div className="service-row__actions">
-                  <button type="button" disabled={busy} onClick={() => openEditModal(service)}>
-                    编辑
+            {notice ? <div className="notice notice--good">{notice}</div> : null}
+            {errorText ? <div className="notice notice--bad">{errorText}</div> : null}
+          </section>
+
+          <section className="board">
+            <div className="board__head">
+              <div>
+                <h2>服务列表</h2>
+                <p>点击行查看状态，编辑与新增使用弹窗，日志窗口自动跟随最新输出。</p>
+              </div>
+            </div>
+
+            <div className="service-list">
+              {services.length === 0 ? (
+                <div className="empty">还没有服务，先从上面的新增开始。</div>
+              ) : null}
+
+              {services.map((service) => (
+                <article
+                  key={service.id}
+                  className={`service-row${selectedId === service.id ? " is-selected" : ""}`}
+                >
+                  <button
+                    type="button"
+                    className="service-row__main"
+                    onClick={() => selectService(service)}
+                  >
+                    <div className="service-row__title">
+                      <strong>{service.name}</strong>
+                      <span className={`state${service.running ? " running" : ""}`}>
+                        {service.running ? `运行中 #${service.pid ?? "-"}` : "未运行"}
+                      </span>
+                    </div>
+                    <span className="service-row__meta">{service.command || "未配置启动命令"}</span>
+                    <span className="service-row__sub">
+                      {service.cwd || "未配置工作目录"} · {service.enabled ? "已启用" : "已禁用"}
+                    </span>
                   </button>
-                  <button type="button" disabled={busy} onClick={() => void toggleService(service)}>
-                    {service.running ? "停止" : "启动"}
-                  </button>
-                  <button type="button" disabled={busy} onClick={() => openLogModal(service)}>
-                    日志
-                  </button>
-                  <button type="button" className="danger-text" disabled={busy} onClick={() => void deleteService(service.id)}>
-                    删除
-                  </button>
-                </div>
-              </article>
-            ))}
-          </div>
+
+                  <div className="service-row__actions">
+                    <button type="button" disabled={busy} onClick={() => openEditModal(service)}>
+                      编辑
+                    </button>
+                    <button type="button" disabled={busy} onClick={() => void toggleService(service)}>
+                      {service.running ? "停止" : "启动"}
+                    </button>
+                    <button type="button" disabled={busy} onClick={() => openLogModal(service)}>
+                      日志
+                    </button>
+                    <button
+                      type="button"
+                      className="danger-text"
+                      disabled={busy}
+                      onClick={() => void deleteService(service.id)}
+                    >
+                      删除
+                    </button>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </section>
         </section>
       </div>
 
