@@ -343,6 +343,7 @@ textarea:focus {
   border-radius: 999px;
   background: var(--cursor-glow);
   filter: blur(18px);
+  transform: translate(36px, 36px);
   transition: transform 0.08s ease-out, opacity 0.18s ease-out;
   opacity: 0;
   pointer-events: none;

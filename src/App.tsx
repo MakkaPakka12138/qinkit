@@ -31,8 +31,8 @@ type RefreshOptions = {
 };
 
 export default function App() {
-  const shellRef = useRef<HTMLDivElement | null>(null);
   const workspaceRef = useRef<HTMLElement | null>(null);
+  const cursorGlowRef = useRef<HTMLDivElement | null>(null);
   const logViewRef = useRef<HTMLPreElement | null>(null);
   const titlebarDragTimerRef = useRef<number | null>(null);
   const servicesRef = useRef<ServiceView[]>([]);
@@ -61,7 +61,6 @@ export default function App() {
   const [windowMaximized, setWindowMaximized] = useState(false);
   const [workspaceScrollable, setWorkspaceScrollable] = useState(false);
   const [selectedServiceIds, setSelectedServiceIds] = useState<string[]>([]);
-  const [mousePosition, setMousePosition] = useState({ x: 80, y: 80 });
   const [glowVisible, setGlowVisible] = useState(false);
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => {
     const saved = window.localStorage.getItem(THEME_STORAGE_KEY);
@@ -202,10 +201,6 @@ export default function App() {
       window.removeEventListener("resize", syncWorkspaceOverflow);
     };
   }, [errorText, notice, services]);
-
-  const cursorGlowStyle = {
-    transform: `translate(${mousePosition.x - 44}px, ${mousePosition.y - 44}px)`
-  } as React.CSSProperties;
 
   function clearProcessScanTimer() {
     if (processScanTimerRef.current) {
@@ -853,10 +848,11 @@ export default function App() {
     const rect = workspaceRef.current?.getBoundingClientRect();
     if (!rect) return;
 
-    setMousePosition({
-      x: event.clientX - rect.left,
-      y: event.clientY - rect.top
-    });
+    const x = event.clientX - rect.left - 44;
+    const y = event.clientY - rect.top - 44;
+    if (cursorGlowRef.current) {
+      cursorGlowRef.current.style.transform = `translate(${x}px, ${y}px)`;
+    }
   }
 
   function scrollLogTo(position: "top" | "bottom") {
@@ -884,7 +880,7 @@ export default function App() {
   }
 
   return (
-    <main ref={shellRef} className="shell">
+    <main className="shell">
       <div className="app-frame">
         <Titlebar
           themeMode={themeMode}
@@ -910,7 +906,7 @@ export default function App() {
           onMouseEnter={() => setGlowVisible(true)}
           onMouseLeave={() => setGlowVisible(false)}
         >
-          <div className={`cursor-glow${glowVisible ? " is-visible" : ""}`} style={cursorGlowStyle} />
+          <div ref={cursorGlowRef} className={`cursor-glow${glowVisible ? " is-visible" : ""}`} />
           <ActionPanel
             serviceCount={services.length}
             runningCount={runningCount}

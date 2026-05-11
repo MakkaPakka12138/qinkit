@@ -5,7 +5,7 @@ use crate::{
 use std::{
     collections::HashMap,
     fs::File,
-    io::{BufRead, BufReader, Read, Write},
+    io::{Read, Write},
     process::{Command, Stdio},
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -15,6 +15,9 @@ use std::{
     time::Duration,
 };
 use tauri::AppHandle;
+
+const LOG_READ_CHUNK_SIZE: usize = 8192;
+const MAX_ROUTED_LINE_BYTES: usize = 64 * 1024;
 
 fn is_running(manager: &ServiceManager, id: &str) -> Result<bool, String> {
     let processes = manager
@@ -273,20 +276,18 @@ fn write_log_line(log: &Arc<Mutex<File>>, line: &[u8]) -> Result<(), String> {
         .map_err(|err| format!("写入日志失败: {err}"))
 }
 
-fn spawn_stdout_logger<R>(stream: R, stdout_log: Arc<Mutex<File>>)
+fn spawn_stdout_logger<R>(mut stream: R, stdout_log: Arc<Mutex<File>>)
 where
     R: Read + Send + 'static,
 {
     thread::spawn(move || {
-        let mut reader = BufReader::new(stream);
-        let mut line = Vec::new();
+        let mut buffer = [0; LOG_READ_CHUNK_SIZE];
 
         loop {
-            line.clear();
-            match reader.read_until(b'\n', &mut line) {
+            match stream.read(&mut buffer) {
                 Ok(0) => break,
-                Ok(_) => {
-                    let _ = write_log_line(&stdout_log, &line);
+                Ok(read_size) => {
+                    let _ = write_log_line(&stdout_log, &buffer[..read_size]);
                 }
                 Err(_) => break,
             }
@@ -294,27 +295,70 @@ where
     });
 }
 
-fn spawn_stderr_router<R>(stream: R, stdout_log: Arc<Mutex<File>>, stderr_log: Arc<Mutex<File>>)
+fn route_stderr_line(
+    line: &[u8],
+    stdout_log: &Arc<Mutex<File>>,
+    stderr_log: &Arc<Mutex<File>>,
+    current_line_is_error: &mut Option<bool>,
+    ended_line: bool,
+) {
+    if line.is_empty() {
+        return;
+    }
+
+    let is_error = match *current_line_is_error {
+        Some(is_error) => is_error,
+        None => stderr_line_is_error(line),
+    };
+    let target_log = if is_error { stderr_log } else { stdout_log };
+    let _ = write_log_line(target_log, line);
+
+    if ended_line {
+        *current_line_is_error = None;
+    } else {
+        *current_line_is_error = Some(is_error);
+    }
+}
+
+fn spawn_stderr_router<R>(mut stream: R, stdout_log: Arc<Mutex<File>>, stderr_log: Arc<Mutex<File>>)
 where
     R: Read + Send + 'static,
 {
     thread::spawn(move || {
-        let mut reader = BufReader::new(stream);
+        let mut buffer = [0; LOG_READ_CHUNK_SIZE];
         let mut line = Vec::new();
+        let mut current_line_is_error = None;
 
         loop {
-            line.clear();
-            match reader.read_until(b'\n', &mut line) {
+            match stream.read(&mut buffer) {
                 Ok(0) => break,
-                Ok(_) if stderr_line_is_error(&line) => {
-                    let _ = write_log_line(&stderr_log, &line);
-                }
-                Ok(_) => {
-                    let _ = write_log_line(&stdout_log, &line);
+                Ok(read_size) => {
+                    for byte in &buffer[..read_size] {
+                        line.push(*byte);
+                        let ended_line = *byte == b'\n';
+                        if ended_line || line.len() >= MAX_ROUTED_LINE_BYTES {
+                            route_stderr_line(
+                                &line,
+                                &stdout_log,
+                                &stderr_log,
+                                &mut current_line_is_error,
+                                ended_line,
+                            );
+                            line.clear();
+                        }
+                    }
                 }
                 Err(_) => break,
             }
         }
+
+        route_stderr_line(
+            &line,
+            &stdout_log,
+            &stderr_log,
+            &mut current_line_is_error,
+            true,
+        );
     });
 }
 

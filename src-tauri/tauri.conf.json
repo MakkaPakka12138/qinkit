@@ -34,7 +34,7 @@
     ],
     "category": "DeveloperTool",
     "shortDescription": "轻量命令服务管理器",
-    "longDescription": "一个基于 Tauri + Vue + Rust 的 Windows 轻量命令托管和服务管理器。",
+    "longDescription": "一个基于 Tauri + React + Rust 的 Windows 轻量命令托管和服务管理器。",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

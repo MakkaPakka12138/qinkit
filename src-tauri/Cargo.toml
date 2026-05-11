@@ -1,7 +1,7 @@
 [package]
 name = "lite-service-manager"
 version = "0.1.0"
-description = "A lightweight Windows command service manager built with Tauri, Rust and Vue."
+description = "A lightweight Windows command service manager built with Tauri, Rust and React."
 authors = ["makabaka"]
 edition = "2021"
 
