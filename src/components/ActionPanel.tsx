@@ -5,9 +5,11 @@ type ActionPanelProps = {
   busy: boolean;
   notice: string;
   errorText: string;
+  closeToTray: boolean;
   onRefresh: () => void;
   onCreate: () => void;
   onStartAll: () => void;
+  onToggleCloseToTray: () => void;
 };
 
 export function ActionPanel({
@@ -17,9 +19,11 @@ export function ActionPanel({
   busy,
   notice,
   errorText,
+  closeToTray,
   onRefresh,
   onCreate,
-  onStartAll
+  onStartAll,
+  onToggleCloseToTray
 }: ActionPanelProps) {
   return (
     <section className="action-panel">
@@ -38,6 +42,9 @@ export function ActionPanel({
           </button>
           <button type="button" className="primary alt" disabled={busy} onClick={onStartAll}>
             一键启动
+          </button>
+          <button type="button" className="ghost soft" onClick={onToggleCloseToTray}>
+            关闭到托盘: {closeToTray ? "开" : "关"}
           </button>
         </div>
       </div>

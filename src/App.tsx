@@ -13,6 +13,7 @@ import { blankForm, buildDefaultLogDir, normalizeService, toServiceConfig } from
 
 const appWindow = getCurrentWindow();
 const THEME_STORAGE_KEY = "lite-service-manager-theme";
+const CLOSE_TO_TRAY_STORAGE_KEY = "lite-service-manager-close-to-tray";
 
 export default function App() {
   const shellRef = useRef<HTMLDivElement | null>(null);
@@ -46,6 +47,7 @@ export default function App() {
     }
     return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
   });
+  const [closeToTray, setCloseToTray] = useState(() => window.localStorage.getItem(CLOSE_TO_TRAY_STORAGE_KEY) !== "0");
 
   const logService = useMemo(
     () => services.find((service) => service.id === logServiceId) ?? null,
@@ -76,6 +78,11 @@ export default function App() {
     document.documentElement.style.colorScheme = themeMode;
     window.localStorage.setItem(THEME_STORAGE_KEY, themeMode);
   }, [themeMode]);
+
+  useEffect(() => {
+    window.localStorage.setItem(CLOSE_TO_TRAY_STORAGE_KEY, closeToTray ? "1" : "0");
+    void invoke("set_close_to_tray", { enabled: closeToTray }).catch(() => undefined);
+  }, [closeToTray]);
 
   useEffect(() => {
     void refresh(true);
@@ -427,14 +434,9 @@ export default function App() {
 
   async function closeWindow() {
     try {
-      await appWindow.hide();
-      await appWindow.destroy();
+      await invoke("window_close");
     } catch {
-      try {
-        await invoke("window_close");
-      } catch {
-        // ignore
-      }
+      // ignore
     }
   }
 
@@ -540,9 +542,11 @@ export default function App() {
             busy={busy}
             notice={notice}
             errorText={errorText}
+            closeToTray={closeToTray}
             onRefresh={() => void refresh(false)}
             onCreate={openCreateModal}
             onStartAll={() => void startAll()}
+            onToggleCloseToTray={() => setCloseToTray((current) => !current)}
           />
 
           <ServiceList

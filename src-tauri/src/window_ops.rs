@@ -1,4 +1,7 @@
-use std::{path::Path, process::{Command, Stdio}};
+use std::{
+    path::Path,
+    process::{Command, Stdio},
+};
 use tauri::Window;
 
 pub(crate) fn open_path(path: String) -> Result<(), String> {
@@ -68,7 +71,6 @@ pub(crate) fn window_toggle_maximize(window: Window) -> Result<bool, String> {
 }
 
 pub(crate) fn window_close(window: Window) -> Result<(), String> {
-    let _ = window.hide();
     window.close().map_err(|err| format!("关闭窗口失败: {err}"))
 }
 

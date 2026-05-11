@@ -4,7 +4,7 @@ use crate::{
     process_manager::{
         start_service_from_config, stop_service_inner, sync_discovered_processes,
     },
-    types::{ServiceConfig, ServiceManager, ServiceView},
+    types::{ServiceConfig, ServiceManager, ServiceView, WindowBehaviorState},
     window_ops,
 };
 use tauri::{AppHandle, State, Window};
@@ -121,4 +121,17 @@ pub(crate) fn window_close(window: Window) -> Result<(), String> {
 #[tauri::command]
 pub(crate) fn window_start_dragging(window: Window) -> Result<(), String> {
     window_ops::window_start_dragging(window)
+}
+
+#[tauri::command]
+pub(crate) fn set_close_to_tray(
+    state: State<'_, WindowBehaviorState>,
+    enabled: bool,
+) -> Result<(), String> {
+    let mut close_to_tray = state
+        .close_to_tray
+        .lock()
+        .map_err(|_| "关闭行为状态锁被污染。".to_string())?;
+    *close_to_tray = enabled;
+    Ok(())
 }

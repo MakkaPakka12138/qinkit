@@ -50,6 +50,11 @@ pub(crate) struct ServiceManager {
     pub(crate) processes: Arc<Mutex<HashMap<String, RunningProcess>>>,
 }
 
+#[derive(Default)]
+pub(crate) struct WindowBehaviorState {
+    pub(crate) close_to_tray: Mutex<bool>,
+}
+
 #[cfg(target_os = "windows")]
 #[derive(Debug, Deserialize)]
 pub(crate) struct SystemProcessInfo {
