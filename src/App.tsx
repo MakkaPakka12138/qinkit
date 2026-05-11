@@ -3,95 +3,16 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { confirm, open } from "@tauri-apps/plugin-dialog";
 import { useEffect, useMemo, useRef, useState } from "react";
 import logoPng from "./assets/logo.png";
-
-type ServiceConfig = {
-  id: string;
-  name: string;
-  command: string;
-  cwd: string;
-  enabled: boolean;
-  auto_start: boolean;
-  auto_restart: boolean;
-  restart_delay_seconds: number;
-  log_dir: string;
-  stdout_log: string;
-  stderr_log: string;
-};
-
-type ServiceView = ServiceConfig & {
-  running: boolean;
-  pid: number | null;
-};
-
-type LogType = "stdout" | "stderr";
-type ThemeMode = "light" | "dark";
+import { ActionPanel } from "./components/ActionPanel";
+import { LogModal } from "./components/LogModal";
+import { ServiceEditorModal } from "./components/ServiceEditorModal";
+import { ServiceList } from "./components/ServiceList";
+import { Titlebar } from "./components/Titlebar";
+import type { LogType, ServiceConfig, ServiceView, ThemeMode } from "./types";
+import { blankForm, buildDefaultLogDir, normalizeService, toServiceConfig } from "./utils/service";
 
 const appWindow = getCurrentWindow();
 const THEME_STORAGE_KEY = "lite-service-manager-theme";
-
-function Icon({ path }: { path: string }) {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" className="icon">
-      <path d={path} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
-function toServiceConfig(service: ServiceConfig | ServiceView): ServiceConfig {
-  const { id, name, command, cwd, enabled, auto_start, auto_restart, restart_delay_seconds, log_dir, stdout_log, stderr_log } =
-    service;
-  return {
-    id,
-    name,
-    command,
-    cwd,
-    enabled,
-    auto_start,
-    auto_restart,
-    restart_delay_seconds,
-    log_dir,
-    stdout_log,
-    stderr_log
-  };
-}
-
-function buildDefaultLogDir(cwd: string) {
-  const root = cwd.trim().replace(/[\\/]+$/, "");
-  if (!root) return "";
-  return `${root}\\logs`;
-}
-
-function blankForm(): ServiceConfig {
-  const id = `svc_${Date.now()}`;
-  return {
-    id,
-    name: "新服务",
-    command: "",
-    cwd: "",
-    enabled: true,
-    auto_start: false,
-    auto_restart: true,
-    restart_delay_seconds: 3,
-    log_dir: "",
-    stdout_log: "",
-    stderr_log: ""
-  };
-}
-
-function normalizeService(input: ServiceConfig): ServiceConfig {
-  const id = input.id.trim() || `svc_${Date.now()}`;
-  return {
-    ...input,
-    id,
-    name: input.name.trim() || id,
-    command: input.command.trim(),
-    cwd: input.cwd.trim(),
-    log_dir: input.log_dir.trim(),
-    stdout_log: input.stdout_log.trim(),
-    stderr_log: input.stderr_log.trim(),
-    restart_delay_seconds: Math.max(1, Number(input.restart_delay_seconds || 3))
-  };
-}
 
 export default function App() {
   const shellRef = useRef<HTMLDivElement | null>(null);
@@ -587,9 +508,13 @@ export default function App() {
   return (
     <main ref={shellRef} className="shell">
       <div className="app-frame">
-        <header
-          className="titlebar"
-          data-tauri-drag-region=""
+        <Titlebar
+          themeMode={themeMode}
+          windowMaximized={windowMaximized}
+          onToggleTheme={toggleThemeMode}
+          onMinimize={() => void minimizeWindow()}
+          onToggleMaximize={() => void toggleWindowMaximize()}
+          onClose={() => void closeWindow()}
           onMouseDownCapture={(event) => {
             void handleTitlebarMouseDown(event);
           }}
@@ -598,59 +523,7 @@ export default function App() {
           onDoubleClickCapture={(event) => {
             void handleTitlebarDoubleClick(event);
           }}
-        >
-          <div className="titlebar__drag">
-            <div className="brand-mark">
-              <img src={logoPng} alt="Qinkit logo" className="brand-mark__image" />
-            </div>
-            <div className="brand-copy">
-              <strong>轻启·服务管理器</strong>
-              <span>Qinkit server runner</span>
-            </div>
-          </div>
-
-          <div className="titlebar__actions">
-            <button
-              type="button"
-              className="theme-toggle"
-              aria-label={themeMode === "dark" ? "切换到浅色主题" : "切换到暗色主题"}
-              title={themeMode === "dark" ? "切换到浅色主题" : "切换到暗色主题"}
-              onClick={toggleThemeMode}
-            >
-              <Icon path={themeMode === "dark" ? "M12 3v2.2M12 18.8V21M4.9 4.9l1.5 1.5M17.6 17.6l1.5 1.5M3 12h2.2M18.8 12H21M4.9 19.1l1.5-1.5M17.6 6.4l1.5-1.5M12 7.2a4.8 4.8 0 1 0 0 9.6 4.8 4.8 0 0 0 0-9.6Z" : "M19 12.8A7 7 0 1 1 11.2 5a5.6 5.6 0 0 0 7.8 7.8Z"} />
-            </button>
-
-            <div className="window-actions">
-              <button
-                type="button"
-                className="window-btn window-btn--minimize"
-                aria-label="最小化"
-                title="最小化"
-                onClick={() => void minimizeWindow()}
-              >
-                <span className="window-btn__glyph">−</span>
-              </button>
-              <button
-                type="button"
-                className="window-btn window-btn--maximize"
-                aria-label={windowMaximized ? "还原" : "最大化"}
-                title={windowMaximized ? "还原" : "最大化"}
-                onClick={() => void toggleWindowMaximize()}
-              >
-                <span className="window-btn__glyph">{windowMaximized ? "❐" : "□"}</span>
-              </button>
-              <button
-                type="button"
-                className="window-btn window-btn--close"
-                aria-label="关闭"
-                title="关闭"
-                onClick={() => void closeWindow()}
-              >
-                <span className="window-btn__glyph">×</span>
-              </button>
-            </div>
-          </div>
-        </header>
+        />
 
         <section
           ref={workspaceRef}
@@ -660,253 +533,58 @@ export default function App() {
           onMouseLeave={() => setGlowVisible(false)}
         >
           <div className={`cursor-glow${glowVisible ? " is-visible" : ""}`} style={cursorGlowStyle} />
-          <section className="action-panel">
-            <div className="action-strip">
-              <div className="stats-bar">
-                <span>{services.length} 个服务</span>
-                <span>{runningCount} 运行中</span>
-                <span>{enabledCount} 已启用</span>
-              </div>
-              <div className="action-strip__buttons">
-                <button type="button" className="ghost soft" disabled={busy} onClick={() => void refresh(false)}>
-                  刷新
-                </button>
-                <button type="button" className="primary" disabled={busy} onClick={openCreateModal}>
-                  新增
-                </button>
-                <button type="button" className="primary alt" disabled={busy} onClick={() => void startAll()}>
-                  一键启动
-                </button>
-              </div>
-            </div>
+          <ActionPanel
+            serviceCount={services.length}
+            runningCount={runningCount}
+            enabledCount={enabledCount}
+            busy={busy}
+            notice={notice}
+            errorText={errorText}
+            onRefresh={() => void refresh(false)}
+            onCreate={openCreateModal}
+            onStartAll={() => void startAll()}
+          />
 
-            {notice ? <div className="notice notice--good">{notice}</div> : null}
-            {errorText ? <div className="notice notice--bad">{errorText}</div> : null}
-          </section>
-
-          <section className="board">
-            <div className="board__head">
-              <div>
-                <h2>服务列表</h2>
-                <p>点击行查看状态，编辑与新增使用弹窗，日志窗口自动跟随最新输出。</p>
-              </div>
-            </div>
-
-            <div className="service-list">
-              {services.length === 0 ? (
-                <div className="empty">还没有服务，先从上面的新增开始。</div>
-              ) : null}
-
-              {services.map((service) => (
-                <article key={service.id} className="service-row">
-                  <div className="service-row__main">
-                    <div className="service-row__title">
-                      <strong>{service.name}</strong>
-                      <span className={`state${service.running ? " running" : ""}`}>
-                        {service.running ? `运行中 #${service.pid ?? "-"}` : "未运行"}
-                      </span>
-                    </div>
-                    <span className="service-row__meta">{service.command || "未配置启动命令"}</span>
-                    <span className="service-row__sub">
-                      {service.cwd || "未配置工作目录"} · {service.enabled ? "已启用" : "已禁用"}
-                    </span>
-                  </div>
-
-                  <div className="service-row__actions">
-                    <button type="button" disabled={busy} onClick={() => openEditModal(service)}>
-                      编辑
-                    </button>
-                    <button type="button" disabled={busy} onClick={() => void toggleService(service)}>
-                      {service.running ? "停止" : "启动"}
-                    </button>
-                    <button type="button" disabled={busy} onClick={() => void restartService(service.id)}>
-                      重启
-                    </button>
-                    <button type="button" disabled={busy} onClick={() => openLogModal(service)}>
-                      日志
-                    </button>
-                    <button
-                      type="button"
-                      className="danger-text"
-                      disabled={busy}
-                      onClick={() => void deleteService(service.id)}
-                    >
-                      删除
-                    </button>
-                  </div>
-                </article>
-              ))}
-            </div>
-          </section>
+          <ServiceList
+            services={services}
+            busy={busy}
+            onEdit={openEditModal}
+            onToggle={(service) => void toggleService(service)}
+            onRestart={(id) => void restartService(id)}
+            onOpenLog={openLogModal}
+            onDelete={(id) => void deleteService(id)}
+          />
         </section>
       </div>
 
       {editorOpen ? (
-        <div className="modal-mask" onClick={closeEditor}>
-          <section className="modal modal--editor" onClick={(event) => event.stopPropagation()}>
-            <div className="modal__head">
-              <div>
-                <h3>{editorMode === "create" ? "新增服务" : "编辑服务"}</h3>
-                <p>启动命令会通过 PowerShell 运行。</p>
-              </div>
-              <button type="button" className="ghost icon-btn" title="关闭" aria-label="关闭" onClick={closeEditor}>
-                <Icon path="M6 6l12 12M18 6L6 18" />
-              </button>
-            </div>
-
-            <div className="form-grid">
-              <label>
-                <span>服务 ID</span>
-                <input value={form.id} onChange={(event) => updateFormField("id", event.target.value)} placeholder="backend" />
-              </label>
-
-              <label>
-                <span>显示名称</span>
-                <input value={form.name} onChange={(event) => updateFormField("name", event.target.value)} placeholder="ERP 后端" />
-              </label>
-
-              <label className="wide">
-                <span>启动命令</span>
-                <textarea
-                  rows={4}
-                  value={form.command}
-                  onChange={(event) => updateFormField("command", event.target.value)}
-                  placeholder="python -m uvicorn app.main:app --host 0.0.0.0 --port 8000"
-                />
-              </label>
-
-              <label className="wide">
-                <span>工作目录</span>
-                <div className="field-actions">
-                  <input value={form.cwd} onChange={(event) => updateFormField("cwd", event.target.value)} placeholder="E:\\project\\backend" />
-                  <button type="button" className="icon-btn" title="选择目录" aria-label="选择目录" onClick={() => void pickDirectory()}>
-                    <Icon path="M4 7.5h5l2 2H20v7.5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zM4 7.5V6a2 2 0 0 1 2-2h3l2 2" />
-                  </button>
-                  <button type="button" className="icon-btn" title="生成日志路径" aria-label="生成日志路径" onClick={applyLogPaths}>
-                    <Icon path="M12 3l1.8 4.7L19 9.5l-4 3.2 1.2 5.3L12 15.2 7.8 18l1.2-5.3-4-3.2 5.2-1.8z" />
-                  </button>
-                  <button type="button" className="icon-btn" title="打开目录" aria-label="打开目录" disabled={!form.cwd.trim()} onClick={() => void openPath(form.cwd)}>
-                    <Icon path="M14 5h5v5M10 14 19 5M19 14v4a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h4" />
-                  </button>
-                </div>
-              </label>
-
-              <label className="wide">
-                <span>日志目录</span>
-                <div className="field-actions">
-                  <input value={form.log_dir} onChange={(event) => updateFormField("log_dir", event.target.value)} placeholder="E:\\project\\backend\\logs" />
-                  <button type="button" className="icon-btn" title="选择日志目录" aria-label="选择日志目录" onClick={() => void pickLogDir()}>
-                    <Icon path="M4 7.5h5l2 2H20v7.5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zM4 7.5V6a2 2 0 0 1 2-2h3l2 2" />
-                  </button>
-                  <button type="button" className="icon-btn" title="生成日志目录" aria-label="生成日志目录" onClick={applyLogPaths}>
-                    <Icon path="M12 3l1.8 4.7L19 9.5l-4 3.2 1.2 5.3L12 15.2 7.8 18l1.2-5.3-4-3.2 5.2-1.8z" />
-                  </button>
-                  <button type="button" className="icon-btn" title="打开日志目录" aria-label="打开日志目录" disabled={!form.log_dir.trim()} onClick={() => void openPath(form.log_dir)}>
-                    <Icon path="M14 5h5v5M10 14 19 5M19 14v4a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h4" />
-                  </button>
-                </div>
-              </label>
-
-              <label className="wide">
-                <span>当前日志文件由每次启动自动生成，避免单个日志文件持续膨胀。</span>
-              </label>
-
-              <label>
-                <span>重启延迟 / 秒</span>
-                <input
-                  type="number"
-                  min={1}
-                  value={form.restart_delay_seconds}
-                  onChange={(event) => updateFormField("restart_delay_seconds", Number(event.target.value))}
-                />
-              </label>
-
-              <div className="checkbox-group">
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={form.enabled}
-                    onChange={(event) => updateFormField("enabled", event.target.checked)}
-                  />
-                  启用
-                </label>
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={form.auto_start}
-                    onChange={(event) => updateFormField("auto_start", event.target.checked)}
-                  />
-                  打开软件后自动启动
-                </label>
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={form.auto_restart}
-                    onChange={(event) => updateFormField("auto_restart", event.target.checked)}
-                  />
-                  异常退出自动重启
-                </label>
-              </div>
-            </div>
-
-            <div className="modal__foot">
-              <button type="button" className="ghost icon-btn" title="取消" aria-label="取消" onClick={closeEditor}>
-                <Icon path="M6 6l12 12M18 6L6 18" />
-              </button>
-              <button type="button" className="primary icon-btn" title="保存" aria-label="保存" disabled={busy} onClick={() => void saveCurrent()}>
-                <Icon path="M5 5h11l3 3v11a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1zM8 5v5h8M8 19v-6h8v6" />
-              </button>
-            </div>
-          </section>
-        </div>
+        <ServiceEditorModal
+          busy={busy}
+          editorMode={editorMode}
+          form={form}
+          onClose={closeEditor}
+          onSave={() => void saveCurrent()}
+          onUpdateField={updateFormField}
+          onApplyLogPaths={applyLogPaths}
+          onPickDirectory={() => void pickDirectory()}
+          onPickLogDir={() => void pickLogDir()}
+          onOpenPath={(path) => void openPath(path)}
+        />
       ) : null}
 
       {logModalOpen ? (
-        <div className="modal-mask" onClick={closeLogModal}>
-          <section className="modal modal--log" onClick={(event) => event.stopPropagation()}>
-            <div className="modal__head">
-              <div>
-                <h3>{logService?.name ?? "日志"}</h3>
-                <p>{activeLogPath || "当前没有日志路径"}</p>
-              </div>
-              <button type="button" className="ghost" onClick={closeLogModal}>
-                关闭
-              </button>
-            </div>
-
-            <div className="log-toolbar">
-              <button
-                type="button"
-                className={activeLogType === "stdout" ? "primary" : ""}
-                onClick={() => setActiveLogType("stdout")}
-              >
-                stdout
-              </button>
-              <button
-                type="button"
-                className={activeLogType === "stderr" ? "primary" : ""}
-                onClick={() => setActiveLogType("stderr")}
-              >
-                stderr
-              </button>
-              <button type="button" onClick={() => void readActiveLog()}>
-                刷新
-              </button>
-              <button type="button" onClick={() => scrollLogTo("top")}>
-                置顶
-              </button>
-              <button type="button" onClick={() => scrollLogTo("bottom")}>
-                置底
-              </button>
-              <button type="button" disabled={!activeLogPath} onClick={() => void openPath(activeLogPath)}>
-                打开位置
-              </button>
-              <span className="log-follow">实时跟随中</span>
-            </div>
-
-            <pre ref={logViewRef} className="log-view">{logText || "等待日志输出..."}</pre>
-          </section>
-        </div>
+        <LogModal
+          logService={logService}
+          activeLogPath={activeLogPath}
+          activeLogType={activeLogType}
+          logText={logText}
+          logViewRef={logViewRef}
+          onClose={closeLogModal}
+          onSetActiveLogType={setActiveLogType}
+          onRefresh={() => void readActiveLog()}
+          onScrollTo={scrollLogTo}
+          onOpenPath={(path) => void openPath(path)}
+        />
       ) : null}
     </main>
   );
