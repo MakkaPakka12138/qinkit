@@ -57,7 +57,6 @@ export function LogModal({
           <button type="button" disabled={!activeLogPath} onClick={() => onOpenPath(activeLogPath)}>
             打开位置
           </button>
-          <span className="log-follow">实时跟随中</span>
         </div>
 
         <pre ref={logViewRef} className="log-view">{logText || "等待日志输出..."}</pre>

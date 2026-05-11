@@ -39,6 +39,32 @@ pub(crate) struct ServiceView {
     pub(crate) pid: Option<u32>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct ImportServicesResult {
+    pub(crate) imported_count: usize,
+    pub(crate) added_count: usize,
+    pub(crate) updated_count: usize,
+    pub(crate) total_count: usize,
+    pub(crate) services: Vec<ServiceConfig>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct BatchServiceItemResult {
+    pub(crate) id: String,
+    pub(crate) status: String,
+    pub(crate) pid: Option<u32>,
+    pub(crate) error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct BatchServiceResult {
+    pub(crate) requested_count: usize,
+    pub(crate) succeeded_count: usize,
+    pub(crate) failed_count: usize,
+    pub(crate) skipped_count: usize,
+    pub(crate) items: Vec<BatchServiceItemResult>,
+}
+
 pub(crate) struct RunningProcess {
     pub(crate) pid: u32,
     pub(crate) stop_requested: Arc<AtomicBool>,

@@ -20,15 +20,7 @@ pub(crate) fn load_services(app: &AppHandle) -> Result<Vec<ServiceConfig>, Strin
     if !file.exists() {
         fs::write(&file, "[]").map_err(|err| format!("初始化配置文件失败: {err}"))?;
     }
-    let text = fs::read_to_string(&file).map_err(|err| format!("读取配置文件失败: {err}"))?;
-    let services = serde_json::from_str::<Vec<ServiceConfig>>(&text).map_err(|err| {
-        format!(
-            "解析配置文件失败: {err}\n文件路径: {}",
-            file.to_string_lossy()
-        )
-    })?;
-
-    Ok(services.into_iter().map(normalize_loaded_service).collect())
+    load_services_from_path(&file)
 }
 
 pub(crate) fn persist_services(app: &AppHandle, services: &[ServiceConfig]) -> Result<(), String> {
@@ -36,6 +28,19 @@ pub(crate) fn persist_services(app: &AppHandle, services: &[ServiceConfig]) -> R
     let text = serde_json::to_string_pretty(services)
         .map_err(|err| format!("序列化配置失败: {err}"))?;
     fs::write(&file, text).map_err(|err| format!("写入配置文件失败: {err}"))
+}
+
+pub(crate) fn load_services_from_path(path: impl AsRef<Path>) -> Result<Vec<ServiceConfig>, String> {
+    let path = path.as_ref();
+    let text = fs::read_to_string(path).map_err(|err| format!("读取配置文件失败: {err}"))?;
+    let services = serde_json::from_str::<Vec<ServiceConfig>>(&text).map_err(|err| {
+        format!(
+            "解析配置文件失败: {err}\n文件路径: {}",
+            path.to_string_lossy()
+        )
+    })?;
+
+    Ok(services.into_iter().map(normalize_loaded_service).collect())
 }
 
 fn ensure_parent(path: &str) -> Result<(), String> {

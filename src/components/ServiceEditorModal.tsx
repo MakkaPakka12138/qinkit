@@ -27,7 +27,7 @@ export function ServiceEditorModal({
   onOpenPath
 }: ServiceEditorModalProps) {
   return (
-    <div className="modal-mask" onClick={onClose}>
+    <div className="modal-mask modal-mask--centered" onClick={onClose}>
       <section className="modal modal--editor" onClick={(event) => event.stopPropagation()}>
         <div className="modal__head">
           <div>

@@ -99,9 +99,13 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::list_services,
             commands::save_services,
+            commands::import_services,
             commands::start_service,
             commands::stop_service,
             commands::restart_service,
+            commands::start_services,
+            commands::stop_services,
+            commands::restart_services,
             commands::read_log,
             commands::open_path,
             commands::window_minimize,

@@ -1,13 +1,38 @@
 use crate::{
-    config::{load_services, persist_services},
+    config::{load_services, load_services_from_path, persist_services},
     logs::read_log_tail,
     process_manager::{
         start_service_from_config, stop_service_inner, sync_discovered_processes,
     },
-    types::{ServiceConfig, ServiceManager, ServiceView, WindowBehaviorState},
+    types::{
+        BatchServiceItemResult, BatchServiceResult, ImportServicesResult, ServiceConfig,
+        ServiceManager, ServiceView, WindowBehaviorState,
+    },
     window_ops,
 };
+use std::{collections::HashSet, path::PathBuf};
 use tauri::{AppHandle, State, Window};
+
+fn unique_ids(ids: Vec<String>) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut ordered = Vec::new();
+
+    for id in ids {
+        if seen.insert(id.clone()) {
+            ordered.push(id);
+        }
+    }
+
+    ordered
+}
+
+fn is_tracked_running(manager: &ServiceManager, id: &str) -> Result<bool, String> {
+    let processes = manager
+        .processes
+        .lock()
+        .map_err(|_| "进程状态锁被污染。".to_string())?;
+    Ok(processes.contains_key(id))
+}
 
 #[tauri::command]
 pub(crate) fn list_services(
@@ -57,6 +82,57 @@ pub(crate) fn save_services(
 }
 
 #[tauri::command]
+pub(crate) fn import_services(
+    app: AppHandle,
+    path: String,
+) -> Result<ImportServicesResult, String> {
+    let trimmed_path = path.trim();
+    if trimmed_path.is_empty() {
+        return Err("导入路径不能为空。".to_string());
+    }
+    let import_path = PathBuf::from(trimmed_path);
+
+    let mut current_services = load_services(&app)?;
+    let imported_services = load_services_from_path(&import_path)?;
+
+    let mut deduped_imports = Vec::new();
+    for imported in imported_services {
+        if let Some(index) = deduped_imports
+            .iter()
+            .position(|service: &ServiceConfig| service.id == imported.id)
+        {
+            deduped_imports[index] = imported;
+        } else {
+            deduped_imports.push(imported);
+        }
+    }
+
+    let imported_count = deduped_imports.len();
+    let mut added_count = 0usize;
+    let mut updated_count = 0usize;
+
+    for imported in deduped_imports {
+        if let Some(index) = current_services.iter().position(|service| service.id == imported.id) {
+            current_services[index] = imported;
+            updated_count += 1;
+        } else {
+            current_services.push(imported);
+            added_count += 1;
+        }
+    }
+
+    persist_services(&app, &current_services)?;
+
+    Ok(ImportServicesResult {
+        imported_count,
+        added_count,
+        updated_count,
+        total_count: current_services.len(),
+        services: current_services,
+    })
+}
+
+#[tauri::command]
 pub(crate) fn start_service(
     app: AppHandle,
     manager: State<'_, ServiceManager>,
@@ -91,6 +167,192 @@ pub(crate) fn restart_service(
 ) -> Result<u32, String> {
     let _ = stop_service_inner(manager.inner().clone(), id.clone());
     start_service(app, manager, id)
+}
+
+#[tauri::command]
+pub(crate) fn start_services(
+    app: AppHandle,
+    manager: State<'_, ServiceManager>,
+    ids: Vec<String>,
+) -> Result<BatchServiceResult, String> {
+    let services = load_services(&app)?;
+    let ids = unique_ids(ids);
+    let mut succeeded_count = 0usize;
+    let mut failed_count = 0usize;
+    let mut items = Vec::with_capacity(ids.len());
+
+    for id in &ids {
+        let Some(service) = services.iter().find(|service| service.id == *id) else {
+            failed_count += 1;
+            items.push(BatchServiceItemResult {
+                id: id.clone(),
+                status: "error".to_string(),
+                pid: None,
+                error: Some(format!("找不到服务: {id}")),
+            });
+            continue;
+        };
+
+        if !service.enabled {
+            failed_count += 1;
+            items.push(BatchServiceItemResult {
+                id: id.clone(),
+                status: "error".to_string(),
+                pid: None,
+                error: Some(format!("服务已禁用: {}", service.name)),
+            });
+            continue;
+        }
+
+        match start_service_from_config(&app, manager.inner().clone(), service.clone()) {
+            Ok(pid) => {
+                succeeded_count += 1;
+                items.push(BatchServiceItemResult {
+                    id: id.clone(),
+                    status: "success".to_string(),
+                    pid: Some(pid),
+                    error: None,
+                });
+            }
+            Err(error) => {
+                failed_count += 1;
+                items.push(BatchServiceItemResult {
+                    id: id.clone(),
+                    status: "error".to_string(),
+                    pid: None,
+                    error: Some(error),
+                });
+            }
+        }
+    }
+
+    Ok(BatchServiceResult {
+        requested_count: ids.len(),
+        succeeded_count,
+        failed_count,
+        skipped_count: 0,
+        items,
+    })
+}
+
+#[tauri::command]
+pub(crate) fn stop_services(
+    manager: State<'_, ServiceManager>,
+    ids: Vec<String>,
+) -> Result<BatchServiceResult, String> {
+    let ids = unique_ids(ids);
+    let mut succeeded_count = 0usize;
+    let mut failed_count = 0usize;
+    let mut skipped_count = 0usize;
+    let mut items = Vec::with_capacity(ids.len());
+
+    for id in &ids {
+        let was_running = is_tracked_running(manager.inner(), id)?;
+        match stop_service_inner(manager.inner().clone(), id.clone()) {
+            Ok(()) if was_running => {
+                succeeded_count += 1;
+                items.push(BatchServiceItemResult {
+                    id: id.clone(),
+                    status: "success".to_string(),
+                    pid: None,
+                    error: None,
+                });
+            }
+            Ok(()) => {
+                skipped_count += 1;
+                items.push(BatchServiceItemResult {
+                    id: id.clone(),
+                    status: "skipped".to_string(),
+                    pid: None,
+                    error: None,
+                });
+            }
+            Err(error) => {
+                failed_count += 1;
+                items.push(BatchServiceItemResult {
+                    id: id.clone(),
+                    status: "error".to_string(),
+                    pid: None,
+                    error: Some(error),
+                });
+            }
+        }
+    }
+
+    Ok(BatchServiceResult {
+        requested_count: ids.len(),
+        succeeded_count,
+        failed_count,
+        skipped_count,
+        items,
+    })
+}
+
+#[tauri::command]
+pub(crate) fn restart_services(
+    app: AppHandle,
+    manager: State<'_, ServiceManager>,
+    ids: Vec<String>,
+) -> Result<BatchServiceResult, String> {
+    let services = load_services(&app)?;
+    let ids = unique_ids(ids);
+    let mut succeeded_count = 0usize;
+    let mut failed_count = 0usize;
+    let mut items = Vec::with_capacity(ids.len());
+
+    for id in &ids {
+        let Some(service) = services.iter().find(|service| service.id == *id) else {
+            failed_count += 1;
+            items.push(BatchServiceItemResult {
+                id: id.clone(),
+                status: "error".to_string(),
+                pid: None,
+                error: Some(format!("找不到服务: {id}")),
+            });
+            continue;
+        };
+
+        if !service.enabled {
+            failed_count += 1;
+            items.push(BatchServiceItemResult {
+                id: id.clone(),
+                status: "error".to_string(),
+                pid: None,
+                error: Some(format!("服务已禁用: {}", service.name)),
+            });
+            continue;
+        }
+
+        let _ = stop_service_inner(manager.inner().clone(), id.clone());
+        match start_service_from_config(&app, manager.inner().clone(), service.clone()) {
+            Ok(pid) => {
+                succeeded_count += 1;
+                items.push(BatchServiceItemResult {
+                    id: id.clone(),
+                    status: "success".to_string(),
+                    pid: Some(pid),
+                    error: None,
+                });
+            }
+            Err(error) => {
+                failed_count += 1;
+                items.push(BatchServiceItemResult {
+                    id: id.clone(),
+                    status: "error".to_string(),
+                    pid: None,
+                    error: Some(error),
+                });
+            }
+        }
+    }
+
+    Ok(BatchServiceResult {
+        requested_count: ids.len(),
+        succeeded_count,
+        failed_count,
+        skipped_count: 0,
+        items,
+    })
 }
 
 #[tauri::command]

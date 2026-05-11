@@ -8,7 +8,14 @@ import { LogModal } from "./components/LogModal";
 import { ServiceEditorModal } from "./components/ServiceEditorModal";
 import { ServiceList } from "./components/ServiceList";
 import { Titlebar } from "./components/Titlebar";
-import type { LogType, ServiceConfig, ServiceView, ThemeMode } from "./types";
+import type {
+  BatchServiceResult,
+  ImportServicesResult,
+  LogType,
+  ServiceConfig,
+  ServiceView,
+  ThemeMode
+} from "./types";
 import { blankForm, buildDefaultLogDir, normalizeService, toServiceConfig } from "./utils/service";
 
 const appWindow = getCurrentWindow();
@@ -38,6 +45,8 @@ export default function App() {
   const [activeLogType, setActiveLogType] = useState<LogType>("stdout");
   const [logText, setLogText] = useState("");
   const [windowMaximized, setWindowMaximized] = useState(false);
+  const [workspaceScrollable, setWorkspaceScrollable] = useState(false);
+  const [selectedServiceIds, setSelectedServiceIds] = useState<string[]>([]);
   const [mousePosition, setMousePosition] = useState({ x: 80, y: 80 });
   const [glowVisible, setGlowVisible] = useState(false);
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => {
@@ -59,6 +68,8 @@ export default function App() {
     if (!logService) return "";
     return activeLogType === "stdout" ? logService.stdout_log : logService.stderr_log;
   }, [activeLogType, logService]);
+  const selectedServiceIdSet = useMemo(() => new Set(selectedServiceIds), [selectedServiceIds]);
+  const selectedCount = selectedServiceIds.length;
 
   useEffect(() => {
     servicesRef.current = services;
@@ -126,6 +137,21 @@ export default function App() {
     };
   }, [activeLogType, logModalOpen, logServiceId]);
 
+  useEffect(() => {
+    function syncWorkspaceOverflow() {
+      const node = workspaceRef.current;
+      if (!node) return;
+      setWorkspaceScrollable(node.scrollHeight > node.clientHeight + 1);
+    }
+
+    syncWorkspaceOverflow();
+    window.addEventListener("resize", syncWorkspaceOverflow);
+
+    return () => {
+      window.removeEventListener("resize", syncWorkspaceOverflow);
+    };
+  }, [errorText, notice, services]);
+
   const cursorGlowStyle = {
     transform: `translate(${mousePosition.x - 44}px, ${mousePosition.y - 44}px)`
   } as React.CSSProperties;
@@ -155,18 +181,23 @@ export default function App() {
   async function refresh(quiet = false) {
     try {
       const list = await invoke<ServiceView[]>("list_services");
-      setServices(list);
-
-      const currentLogServiceId = logServiceIdRef.current;
-      if (currentLogServiceId && !list.some((item) => item.id === currentLogServiceId)) {
-        setLogModalOpen(false);
-        setLogServiceId("");
-        setLogText("");
-      }
+      applyServiceList(list);
     } catch (error) {
       if (!quiet) {
         flash(String(error), true);
       }
+    }
+  }
+
+  function applyServiceList(list: ServiceView[]) {
+    setServices(list);
+    setSelectedServiceIds((current) => current.filter((id) => list.some((item) => item.id === id)));
+
+    const currentLogServiceId = logServiceIdRef.current;
+    if (currentLogServiceId && !list.some((item) => item.id === currentLogServiceId)) {
+      setLogModalOpen(false);
+      setLogServiceId("");
+      setLogText("");
     }
   }
 
@@ -182,6 +213,29 @@ export default function App() {
     setEditorOpen(true);
   }
 
+  function openCopyModal(service: ServiceView) {
+    const existingIds = new Set(servicesRef.current.map((item) => item.id));
+    const baseId = `${service.id}_copy`;
+    let nextId = baseId;
+    let suffix = 2;
+
+    while (existingIds.has(nextId)) {
+      nextId = `${baseId}_${suffix}`;
+      suffix += 1;
+    }
+
+    setEditorMode("create");
+    setEditingSourceId("");
+    setForm({
+      ...toServiceConfig(service),
+      id: nextId,
+      name: `${service.name} 副本`,
+      stdout_log: "",
+      stderr_log: ""
+    });
+    setEditorOpen(true);
+  }
+
   function openEditModal(service: ServiceView) {
     setEditorMode("edit");
     setEditingSourceId(service.id);
@@ -191,6 +245,20 @@ export default function App() {
 
   function closeEditor() {
     setEditorOpen(false);
+  }
+
+  function toggleSelectedService(id: string) {
+    setSelectedServiceIds((current) =>
+      current.includes(id) ? current.filter((item) => item !== id) : [...current, id]
+    );
+  }
+
+  function selectAllServices() {
+    setSelectedServiceIds(servicesRef.current.map((service) => service.id));
+  }
+
+  function clearSelectedServices() {
+    setSelectedServiceIds([]);
   }
 
   function applyLogPaths() {
@@ -280,28 +348,133 @@ export default function App() {
     }
   }
 
-  async function startAll() {
-    const enabledServices = servicesRef.current.filter((service) => service.enabled);
-    if (enabledServices.length === 0) {
-      flash("没有可启动的已启用服务。", true);
+  function formatBatchNotice(actionLabel: string, result: BatchServiceResult) {
+    const parts = [`${actionLabel}完成`];
+    parts.push(`成功 ${result.succeeded_count}`);
+    if (result.skipped_count > 0) {
+      parts.push(`跳过 ${result.skipped_count}`);
+    }
+    if (result.failed_count > 0) {
+      parts.push(`失败 ${result.failed_count}`);
+    }
+    return parts.join("，") + "。";
+  }
+
+  function firstBatchError(result: BatchServiceResult) {
+    return result.items.find((item) => item.error)?.error ?? "";
+  }
+
+  async function runBatchAction(
+    command: "start_services" | "stop_services" | "restart_services",
+    ids: string[],
+    emptyMessage: string,
+    actionLabel: string
+  ) {
+    const uniqueIds = Array.from(new Set(ids));
+    if (uniqueIds.length === 0) {
+      flash(emptyMessage, true);
       return;
     }
 
     setBusy(true);
     try {
-      for (const service of enabledServices) {
-        try {
-          await invoke("start_service", { id: service.id });
-        } catch {
-          // keep starting the rest
-        }
+      const result = await invoke<BatchServiceResult>(command, { ids: uniqueIds });
+      await refresh(true);
+
+      if (result.failed_count > 0 && result.succeeded_count === 0) {
+        flash(firstBatchError(result) || `${actionLabel}失败。`, true);
+        return;
       }
 
-      await refresh(true);
-      flash("已执行一键启动。");
+      flash(formatBatchNotice(actionLabel, result), result.failed_count > 0);
     } finally {
       setBusy(false);
     }
+  }
+
+  async function importConfig() {
+    const picked = await open({
+      multiple: false,
+      title: "导入服务配置",
+      filters: [
+        { name: "JSON", extensions: ["json"] },
+        { name: "All Files", extensions: ["*"] }
+      ]
+    });
+
+    if (typeof picked !== "string" || !picked) return;
+
+    setBusy(true);
+    try {
+      const result = await invoke<ImportServicesResult>("import_services", { path: picked });
+      const list = await invoke<ServiceView[]>("list_services");
+      applyServiceList(list);
+      flash(`已导入 ${result.imported_count} 项，新增 ${result.added_count} 项，更新 ${result.updated_count} 项。`);
+    } catch (error) {
+      flash(String(error), true);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function startAll() {
+    await runBatchAction(
+      "start_services",
+      servicesRef.current.filter((service) => service.enabled).map((service) => service.id),
+      "没有可启动的已启用服务。",
+      "一键启动"
+    );
+  }
+
+  async function stopAll() {
+    await runBatchAction(
+      "stop_services",
+      servicesRef.current.filter((service) => service.running).map((service) => service.id),
+      "没有可关闭的运行中服务。",
+      "一键关闭"
+    );
+  }
+
+  async function restartAll() {
+    await runBatchAction(
+      "restart_services",
+      servicesRef.current.filter((service) => service.enabled).map((service) => service.id),
+      "没有可重启的已启用服务。",
+      "一键重启"
+    );
+  }
+
+  async function startSelected() {
+    await runBatchAction(
+      "start_services",
+      servicesRef.current
+        .filter((service) => selectedServiceIdSet.has(service.id) && service.enabled)
+        .map((service) => service.id),
+      "没有可启动的已选服务。",
+      "启动选中"
+    );
+  }
+
+  async function stopSelected() {
+    await runBatchAction(
+      "stop_services",
+      servicesRef.current
+        .filter((service) => selectedServiceIdSet.has(service.id) && service.running)
+        .map((service) => service.id),
+      "没有可关闭的已选运行中服务。",
+      "关闭选中"
+    );
+  }
+
+  async function restartSelected() {
+    await runBatchAction(
+      "restart_services",
+      servicesRef.current
+        .filter((service) => selectedServiceIdSet.has(service.id) && service.enabled)
+        .map((service) => service.id),
+      "没有可重启的已选服务。",
+      "重启选中"
+    );
   }
 
   async function deleteService(id: string) {
@@ -529,7 +702,7 @@ export default function App() {
 
         <section
           ref={workspaceRef}
-          className="workspace"
+          className={`workspace${workspaceScrollable ? " workspace--scrollable" : ""}`}
           onMouseMove={handleWorkspacePointerMove}
           onMouseEnter={() => setGlowVisible(true)}
           onMouseLeave={() => setGlowVisible(false)}
@@ -539,19 +712,31 @@ export default function App() {
             serviceCount={services.length}
             runningCount={runningCount}
             enabledCount={enabledCount}
+            selectedCount={selectedCount}
             busy={busy}
             notice={notice}
             errorText={errorText}
             closeToTray={closeToTray}
             onRefresh={() => void refresh(false)}
+            onImport={() => void importConfig()}
             onCreate={openCreateModal}
             onStartAll={() => void startAll()}
+            onStopAll={() => void stopAll()}
+            onRestartAll={() => void restartAll()}
+            onSelectAll={selectAllServices}
+            onClearSelection={clearSelectedServices}
+            onStartSelected={() => void startSelected()}
+            onStopSelected={() => void stopSelected()}
+            onRestartSelected={() => void restartSelected()}
             onToggleCloseToTray={() => setCloseToTray((current) => !current)}
           />
 
           <ServiceList
             services={services}
             busy={busy}
+            selectedServiceIds={selectedServiceIdSet}
+            onToggleSelected={toggleSelectedService}
+            onCopy={openCopyModal}
             onEdit={openEditModal}
             onToggle={(service) => void toggleService(service)}
             onRestart={(id) => void restartService(id)}
