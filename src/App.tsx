@@ -23,6 +23,12 @@ import { blankForm, buildDefaultLogDir, generateServiceId, normalizeService, toS
 const appWindow = getCurrentWindow();
 const THEME_STORAGE_KEY = "lite-service-manager-theme";
 const CLOSE_TO_TRAY_STORAGE_KEY = "lite-service-manager-close-to-tray";
+const PROCESS_SCAN_BACKOFF_MS = [10_000, 20_000, 30_000, 60_000, 120_000, 300_000];
+
+type RefreshOptions = {
+  quiet?: boolean;
+  scanProcesses?: boolean;
+};
 
 export default function App() {
   const shellRef = useRef<HTMLDivElement | null>(null);
@@ -36,6 +42,9 @@ export default function App() {
   const persistedServicesRef = useRef<ServiceView[]>([]);
   const orderSaveTimerRef = useRef<number | undefined>(undefined);
   const orderSaveVersionRef = useRef(0);
+  const processScanTimerRef = useRef<number | undefined>(undefined);
+  const processScanDelayIndexRef = useRef(0);
+  const lastProcessScanSignatureRef = useRef("");
 
   const [services, setServices] = useState<ServiceView[]>([]);
   const [busy, setBusy] = useState(false);
@@ -139,11 +148,7 @@ export default function App() {
   }, [closeToTray]);
 
   useEffect(() => {
-    void refresh(true);
-
-    const refreshTimer = window.setInterval(() => {
-      void refresh(true);
-    }, 5000);
+    void refreshAfterManualAction(true);
 
     let unlistenResize: (() => void) | undefined;
 
@@ -159,7 +164,7 @@ export default function App() {
     });
 
     return () => {
-      window.clearInterval(refreshTimer);
+      clearProcessScanTimer();
       if (noticeTimerRef.current) {
         window.clearTimeout(noticeTimerRef.current);
       }
@@ -202,6 +207,61 @@ export default function App() {
     transform: `translate(${mousePosition.x - 44}px, ${mousePosition.y - 44}px)`
   } as React.CSSProperties;
 
+  function clearProcessScanTimer() {
+    if (processScanTimerRef.current) {
+      window.clearTimeout(processScanTimerRef.current);
+      processScanTimerRef.current = undefined;
+    }
+  }
+
+  function processScanSignature(list: ServiceView[]) {
+    return list.map((service) => `${service.id}:${service.running ? 1 : 0}:${service.pid ?? ""}`).join("|");
+  }
+
+  function scheduleNextProcessScan() {
+    clearProcessScanTimer();
+    const delay =
+      PROCESS_SCAN_BACKOFF_MS[
+        Math.min(processScanDelayIndexRef.current, PROCESS_SCAN_BACKOFF_MS.length - 1)
+      ];
+
+    processScanTimerRef.current = window.setTimeout(() => {
+      processScanTimerRef.current = undefined;
+      void runScheduledProcessScan();
+    }, delay);
+  }
+
+  function resetProcessScanBackoff(list: ServiceView[]) {
+    processScanDelayIndexRef.current = 0;
+    lastProcessScanSignatureRef.current = processScanSignature(list);
+    scheduleNextProcessScan();
+  }
+
+  async function runScheduledProcessScan() {
+    const list = await refresh({ quiet: true, scanProcesses: true });
+    if (list) {
+      const signature = processScanSignature(list);
+      if (signature === lastProcessScanSignatureRef.current) {
+        processScanDelayIndexRef.current = Math.min(
+          processScanDelayIndexRef.current + 1,
+          PROCESS_SCAN_BACKOFF_MS.length - 1
+        );
+      } else {
+        processScanDelayIndexRef.current = 0;
+      }
+      lastProcessScanSignatureRef.current = signature;
+    }
+    scheduleNextProcessScan();
+  }
+
+  async function refreshAfterManualAction(quiet = true) {
+    const list = await refresh({ quiet, scanProcesses: true });
+    if (list) {
+      resetProcessScanBackoff(list);
+    }
+    return list;
+  }
+
   function flash(message: string, isError = false) {
     if (noticeTimerRef.current) {
       window.clearTimeout(noticeTimerRef.current);
@@ -224,14 +284,16 @@ export default function App() {
     }, 3200);
   }
 
-  async function refresh(quiet = false) {
+  async function refresh({ quiet = false, scanProcesses = false }: RefreshOptions = {}) {
     try {
-      const list = await invoke<ServiceView[]>("list_services");
+      const list = await invoke<ServiceView[]>("list_services", { scanProcesses });
       applyServiceList(list);
+      return list;
     } catch (error) {
       if (!quiet) {
         flash(String(error), true);
       }
+      return null;
     }
   }
 
@@ -422,7 +484,7 @@ export default function App() {
 
       await invoke("save_services", { services: withoutSource });
       setEditorOpen(false);
-      await refresh(true);
+      await refresh({ quiet: true });
       flash(editorMode === "create" ? "服务已新增。" : "服务已更新。");
     } catch (error) {
       flash(String(error), true);
@@ -435,7 +497,7 @@ export default function App() {
     setBusy(true);
     try {
       await invoke("start_service", { id });
-      await refresh(true);
+      await refreshAfterManualAction(true);
       flash("服务已启动。");
     } catch (error) {
       flash(String(error), true);
@@ -448,7 +510,7 @@ export default function App() {
     setBusy(true);
     try {
       await invoke("stop_service", { id });
-      await refresh(true);
+      await refreshAfterManualAction(true);
       flash("服务已停止。");
     } catch (error) {
       flash(String(error), true);
@@ -461,7 +523,7 @@ export default function App() {
     setBusy(true);
     try {
       await invoke("restart_service", { id });
-      await refresh(true);
+      await refreshAfterManualAction(true);
       flash("服务已重启。");
     } catch (error) {
       flash(String(error), true);
@@ -509,7 +571,7 @@ export default function App() {
     setBusy(true);
     try {
       const result = await invoke<BatchServiceResult>(command, { ids: uniqueIds });
-      await refresh(true);
+      await refreshAfterManualAction(true);
 
       if (result.failed_count > 0 && result.succeeded_count === 0) {
         flash(firstBatchError(result) || `${actionLabel}失败。`, true);
@@ -539,8 +601,7 @@ export default function App() {
     setBusy(true);
     try {
       const result = await invoke<ImportServicesResult>("import_services", { path: picked });
-      const list = await invoke<ServiceView[]>("list_services");
-      applyServiceList(list);
+      await refresh({ quiet: true });
       flash(`已导入 ${result.imported_count} 项，新增 ${result.added_count} 项，更新 ${result.updated_count} 项。`);
     } catch (error) {
       flash(String(error), true);
@@ -636,7 +697,7 @@ export default function App() {
         setLogText("");
       }
 
-      await refresh(true);
+      await refresh({ quiet: true });
       flash("服务已删除。");
     } catch (error) {
       flash(String(error), true);
@@ -858,7 +919,7 @@ export default function App() {
             notice={notice}
             errorText={errorText}
             closeToTray={closeToTray}
-            onRefresh={() => void refresh(false)}
+            onRefresh={() => void refreshAfterManualAction(false)}
             onImport={() => void importConfig()}
             onStartAll={() => void startAll()}
             onStopAll={() => void stopAll()}

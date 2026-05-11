@@ -38,9 +38,12 @@ fn is_tracked_running(manager: &ServiceManager, id: &str) -> Result<bool, String
 pub(crate) fn list_services(
     app: AppHandle,
     manager: State<'_, ServiceManager>,
+    scan_processes: Option<bool>,
 ) -> Result<Vec<ServiceView>, String> {
     let services = load_services(&app)?;
-    sync_discovered_processes(manager.inner(), &services)?;
+    if scan_processes.unwrap_or(false) {
+        sync_discovered_processes(manager.inner(), &services)?;
+    }
     let processes = manager
         .processes
         .lock()
