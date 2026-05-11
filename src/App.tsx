@@ -272,7 +272,7 @@ export default function App() {
     return groups.flatMap((group) => group.services);
   }
 
-  function scheduleServiceOrderSave(nextServices: ServiceView[], message: string) {
+  function scheduleServiceOrderSave(nextServices: ServiceView[]) {
     const version = orderSaveVersionRef.current + 1;
     orderSaveVersionRef.current = version;
 
@@ -282,16 +282,15 @@ export default function App() {
 
     orderSaveTimerRef.current = window.setTimeout(() => {
       orderSaveTimerRef.current = undefined;
-      void persistServiceOrder(nextServices, version, message);
+      void persistServiceOrder(nextServices, version);
     }, 120);
   }
 
-  async function persistServiceOrder(nextServices: ServiceView[], version: number, message: string) {
+  async function persistServiceOrder(nextServices: ServiceView[], version: number) {
     try {
       await invoke("save_services", { services: nextServices.map((service) => toServiceConfig(service)) });
       if (version === orderSaveVersionRef.current) {
         persistedServicesRef.current = nextServices;
-        flash(message);
       }
     } catch (error) {
       if (version === orderSaveVersionRef.current) {
@@ -302,10 +301,10 @@ export default function App() {
     }
   }
 
-  function applyServiceOrder(nextServices: ServiceView[], message: string) {
+  function applyServiceOrder(nextServices: ServiceView[]) {
     servicesRef.current = nextServices;
     setServices(nextServices);
-    scheduleServiceOrderSave(nextServices, message);
+    scheduleServiceOrderSave(nextServices);
   }
 
   function moveGroup(groupKey: string, direction: MoveDirection) {
@@ -313,7 +312,7 @@ export default function App() {
     const nextGroups = reorderItem(groupedServices, groupIndex, direction);
     if (!nextGroups) return;
 
-    applyServiceOrder(flattenServiceGroups(nextGroups), "分组顺序已更新。");
+    applyServiceOrder(flattenServiceGroups(nextGroups));
   }
 
   function moveService(serviceId: string, direction: MoveDirection) {
@@ -329,7 +328,7 @@ export default function App() {
     const nextGroups = groupedServices.map((group, index) =>
       index === groupIndex ? { ...group, services: nextServices } : group
     );
-    applyServiceOrder(flattenServiceGroups(nextGroups), "服务顺序已更新。");
+    applyServiceOrder(flattenServiceGroups(nextGroups));
   }
 
   function openCreateModal() {
