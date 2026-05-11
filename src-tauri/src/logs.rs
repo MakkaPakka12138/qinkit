@@ -1,6 +1,6 @@
 use std::{
     fs::File,
-    io::{BufRead, BufReader},
+    io::{Read, Seek, SeekFrom},
 };
 
 pub(crate) fn read_log_tail(path: &str, max_lines: usize) -> Result<String, String> {
@@ -10,9 +10,33 @@ pub(crate) fn read_log_tail(path: &str, max_lines: usize) -> Result<String, Stri
     }
 
     let keep = max_lines.max(20);
-    let file = File::open(trimmed).map_err(|err| format!("读取日志失败 {trimmed}: {err}"))?;
-    let reader = BufReader::new(file);
-    let lines: Vec<String> = reader.lines().map_while(Result::ok).collect();
+    let mut file = File::open(trimmed).map_err(|err| format!("读取日志失败 {trimmed}: {err}"))?;
+    let mut position = file
+        .seek(SeekFrom::End(0))
+        .map_err(|err| format!("读取日志失败 {trimmed}: {err}"))?;
+
+    let mut buffer = Vec::new();
+    let mut newline_count = 0usize;
+    const CHUNK_SIZE: usize = 8192;
+
+    while position > 0 && newline_count <= keep {
+        let read_size = position.min(CHUNK_SIZE as u64) as usize;
+        position -= read_size as u64;
+
+        file.seek(SeekFrom::Start(position))
+            .map_err(|err| format!("读取日志失败 {trimmed}: {err}"))?;
+
+        let mut chunk = vec![0; read_size];
+        file.read_exact(&mut chunk)
+            .map_err(|err| format!("读取日志失败 {trimmed}: {err}"))?;
+
+        newline_count += chunk.iter().filter(|&&byte| byte == b'\n').count();
+        chunk.extend_from_slice(&buffer);
+        buffer = chunk;
+    }
+
+    let text = String::from_utf8_lossy(&buffer);
+    let lines: Vec<&str> = text.lines().collect();
     let start = lines.len().saturating_sub(keep);
     Ok(lines[start..].join("\n"))
 }
