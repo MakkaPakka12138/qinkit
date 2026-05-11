@@ -10,7 +10,7 @@ use std::{
         Arc, Mutex,
     },
     thread,
-    time::Duration,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tauri::{AppHandle, Manager, State, Window};
 
@@ -24,7 +24,11 @@ struct ServiceConfig {
     auto_start: bool,
     auto_restart: bool,
     restart_delay_seconds: u64,
+    #[serde(default)]
+    log_dir: String,
+    #[serde(default)]
     stdout_log: String,
+    #[serde(default)]
     stderr_log: String,
 }
 
@@ -38,6 +42,7 @@ struct ServiceView {
     auto_start: bool,
     auto_restart: bool,
     restart_delay_seconds: u64,
+    log_dir: String,
     stdout_log: String,
     stderr_log: String,
     running: bool,
@@ -69,12 +74,14 @@ fn load_services(app: &AppHandle) -> Result<Vec<ServiceConfig>, String> {
         fs::write(&file, "[]").map_err(|err| format!("初始化配置文件失败: {err}"))?;
     }
     let text = fs::read_to_string(&file).map_err(|err| format!("读取配置文件失败: {err}"))?;
-    serde_json::from_str::<Vec<ServiceConfig>>(&text).map_err(|err| {
+    let services = serde_json::from_str::<Vec<ServiceConfig>>(&text).map_err(|err| {
         format!(
             "解析配置文件失败: {err}\n文件路径: {}",
             file.to_string_lossy()
         )
-    })
+    })?;
+
+    Ok(services.into_iter().map(normalize_loaded_service).collect())
 }
 
 fn persist_services(app: &AppHandle, services: &[ServiceConfig]) -> Result<(), String> {
@@ -98,6 +105,14 @@ fn ensure_parent(path: &str) -> Result<(), String> {
     Ok(())
 }
 
+fn ensure_dir(path: &str) -> Result<(), String> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return Ok(());
+    }
+    fs::create_dir_all(trimmed).map_err(|err| format!("创建日志目录失败 {trimmed}: {err}"))
+}
+
 fn open_append(path: &str) -> Result<File, String> {
     ensure_parent(path)?;
     OpenOptions::new()
@@ -105,6 +120,93 @@ fn open_append(path: &str) -> Result<File, String> {
         .append(true)
         .open(path)
         .map_err(|err| format!("打开日志文件失败 {path}: {err}"))
+}
+
+fn default_log_dir(cwd: &str) -> String {
+    let root = cwd.trim().trim_end_matches(['\\', '/']);
+    if root.is_empty() {
+        String::new()
+    } else {
+        format!("{root}\\logs")
+    }
+}
+
+fn infer_log_dir(service: &ServiceConfig) -> String {
+    let configured = service.log_dir.trim();
+    if !configured.is_empty() {
+        return configured.to_string();
+    }
+
+    for log_path in [&service.stdout_log, &service.stderr_log] {
+        let trimmed = log_path.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if let Some(parent) = Path::new(trimmed).parent() {
+            if !parent.as_os_str().is_empty() {
+                return parent.to_string_lossy().to_string();
+            }
+        }
+    }
+
+    default_log_dir(&service.cwd)
+}
+
+fn normalize_loaded_service(mut service: ServiceConfig) -> ServiceConfig {
+    if service.log_dir.trim().is_empty() {
+        service.log_dir = infer_log_dir(&service);
+    }
+    service
+}
+
+fn build_runtime_log_paths(service: &ServiceConfig) -> Result<(String, String), String> {
+    let log_dir = infer_log_dir(service);
+    if log_dir.trim().is_empty() {
+        return Err("日志目录不能为空。".to_string());
+    }
+
+    ensure_dir(&log_dir)?;
+
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|err| format!("获取日志时间戳失败: {err}"))?
+        .as_millis();
+
+    let safe_id = service
+        .id
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+
+    Ok((
+        format!("{log_dir}\\{safe_id}_{timestamp}.out.log"),
+        format!("{log_dir}\\{safe_id}_{timestamp}.err.log"),
+    ))
+}
+
+fn update_runtime_logs(
+    app: &AppHandle,
+    id: &str,
+    stdout_log: &str,
+    stderr_log: &str,
+) -> Result<ServiceConfig, String> {
+    let mut services = load_services(app)?;
+    let index = services
+        .iter()
+        .position(|svc| svc.id == id)
+        .ok_or_else(|| format!("找不到服务: {id}"))?;
+
+    services[index].stdout_log = stdout_log.to_string();
+    services[index].stderr_log = stderr_log.to_string();
+    let updated = services[index].clone();
+    persist_services(app, &services)?;
+    Ok(updated)
 }
 
 fn is_running(manager: &ServiceManager, id: &str) -> Result<bool, String> {
@@ -115,7 +217,11 @@ fn is_running(manager: &ServiceManager, id: &str) -> Result<bool, String> {
     Ok(processes.contains_key(id))
 }
 
-fn spawn_process(manager: ServiceManager, service: ServiceConfig) -> Result<u32, String> {
+fn spawn_process(
+    app: &AppHandle,
+    manager: ServiceManager,
+    service: ServiceConfig,
+) -> Result<u32, String> {
     if service.id.trim().is_empty() {
         return Err("服务 ID 不能为空。".to_string());
     }
@@ -132,6 +238,8 @@ fn spawn_process(manager: ServiceManager, service: ServiceConfig) -> Result<u32,
         }
     }
 
+    let (stdout_log, stderr_log) = build_runtime_log_paths(&service)?;
+    let service = update_runtime_logs(app, &service.id, &stdout_log, &stderr_log)?;
     let stdout = open_append(&service.stdout_log)?;
     let stderr = open_append(&service.stderr_log)?;
 
@@ -189,6 +297,7 @@ fn spawn_process(manager: ServiceManager, service: ServiceConfig) -> Result<u32,
 
     let watcher_manager = manager.clone();
     let watcher_service = service.clone();
+    let watcher_app = app.clone();
     thread::spawn(move || {
         let _ = child_ref.lock().ok().and_then(|mut child| child.wait().ok());
 
@@ -203,7 +312,7 @@ fn spawn_process(manager: ServiceManager, service: ServiceConfig) -> Result<u32,
         if should_restart {
             let delay = watcher_service.restart_delay_seconds.max(1);
             thread::sleep(Duration::from_secs(delay));
-            let _ = spawn_process(watcher_manager, watcher_service);
+            let _ = spawn_process(&watcher_app, watcher_manager, watcher_service);
         }
     });
 
@@ -262,6 +371,7 @@ fn list_services(app: AppHandle, manager: State<'_, ServiceManager>) -> Result<V
                 auto_start: svc.auto_start,
                 auto_restart: svc.auto_restart,
                 restart_delay_seconds: svc.restart_delay_seconds,
+                log_dir: svc.log_dir,
                 stdout_log: svc.stdout_log,
                 stderr_log: svc.stderr_log,
                 running: running.is_some(),
@@ -273,7 +383,11 @@ fn list_services(app: AppHandle, manager: State<'_, ServiceManager>) -> Result<V
 
 #[tauri::command]
 fn save_services(app: AppHandle, services: Vec<ServiceConfig>) -> Result<(), String> {
-    persist_services(&app, &services)
+    let normalized = services
+        .into_iter()
+        .map(normalize_loaded_service)
+        .collect::<Vec<_>>();
+    persist_services(&app, &normalized)
 }
 
 #[tauri::command]
@@ -292,7 +406,7 @@ fn start_service(
         return Err(format!("服务已禁用: {}", service.name));
     }
 
-    spawn_process(manager.inner().clone(), service)
+    spawn_process(&app, manager.inner().clone(), service)
 }
 
 fn stop_service_inner(manager: ServiceManager, id: String) -> Result<(), String> {
@@ -429,7 +543,7 @@ fn auto_start_services(app: &AppHandle, manager: ServiceManager) {
         Ok(services) => {
             for service in services {
                 if service.enabled && service.auto_start {
-                    let _ = spawn_process(manager.clone(), service);
+                    let _ = spawn_process(app, manager.clone(), service);
                 }
             }
         }

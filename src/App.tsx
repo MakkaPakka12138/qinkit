@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { confirm, open, save } from "@tauri-apps/plugin-dialog";
+import { confirm, open } from "@tauri-apps/plugin-dialog";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 type ServiceConfig = {
@@ -12,6 +12,7 @@ type ServiceConfig = {
   auto_start: boolean;
   auto_restart: boolean;
   restart_delay_seconds: number;
+  log_dir: string;
   stdout_log: string;
   stderr_log: string;
 };
@@ -34,7 +35,7 @@ function Icon({ path }: { path: string }) {
 }
 
 function toServiceConfig(service: ServiceConfig | ServiceView): ServiceConfig {
-  const { id, name, command, cwd, enabled, auto_start, auto_restart, restart_delay_seconds, stdout_log, stderr_log } =
+  const { id, name, command, cwd, enabled, auto_start, auto_restart, restart_delay_seconds, log_dir, stdout_log, stderr_log } =
     service;
   return {
     id,
@@ -45,15 +46,16 @@ function toServiceConfig(service: ServiceConfig | ServiceView): ServiceConfig {
     auto_start,
     auto_restart,
     restart_delay_seconds,
+    log_dir,
     stdout_log,
     stderr_log
   };
 }
 
-function buildDefaultLogPath(cwd: string, id: string, stream: "out" | "err") {
+function buildDefaultLogDir(cwd: string) {
   const root = cwd.trim().replace(/[\\/]+$/, "");
   if (!root) return "";
-  return `${root}\\logs\\${id}.${stream}.log`;
+  return `${root}\\logs`;
 }
 
 function blankForm(): ServiceConfig {
@@ -67,6 +69,7 @@ function blankForm(): ServiceConfig {
     auto_start: false,
     auto_restart: true,
     restart_delay_seconds: 3,
+    log_dir: "",
     stdout_log: "",
     stderr_log: ""
   };
@@ -80,6 +83,7 @@ function normalizeService(input: ServiceConfig): ServiceConfig {
     name: input.name.trim() || id,
     command: input.command.trim(),
     cwd: input.cwd.trim(),
+    log_dir: input.log_dir.trim(),
     stdout_log: input.stdout_log.trim(),
     stderr_log: input.stderr_log.trim(),
     restart_delay_seconds: Math.max(1, Number(input.restart_delay_seconds || 3))
@@ -89,6 +93,7 @@ function normalizeService(input: ServiceConfig): ServiceConfig {
 export default function App() {
   const shellRef = useRef<HTMLDivElement | null>(null);
   const workspaceRef = useRef<HTMLElement | null>(null);
+  const logViewRef = useRef<HTMLPreElement | null>(null);
   const titlebarDragTimerRef = useRef<number | null>(null);
   const servicesRef = useRef<ServiceView[]>([]);
   const selectedIdRef = useRef("");
@@ -263,12 +268,9 @@ export default function App() {
 
   function applyLogPaths() {
     setForm((current) => {
-      const nextId = current.id.trim() || `svc_${Date.now()}`;
       return {
         ...current,
-        id: nextId,
-        stdout_log: buildDefaultLogPath(current.cwd, nextId, "out"),
-        stderr_log: buildDefaultLogPath(current.cwd, nextId, "err")
+        log_dir: buildDefaultLogDir(current.cwd)
       };
     });
   }
@@ -462,23 +464,21 @@ export default function App() {
         ...current,
         id: nextId,
         cwd: picked,
-        stdout_log: current.stdout_log || buildDefaultLogPath(picked, nextId, "out"),
-        stderr_log: current.stderr_log || buildDefaultLogPath(picked, nextId, "err")
+        log_dir: current.log_dir || buildDefaultLogDir(picked)
       };
     });
   }
 
-  async function pickLogFile(target: "stdout_log" | "stderr_log") {
-    const fallbackName = `${form.id.trim() || "service"}.${target === "stdout_log" ? "out" : "err"}.log`;
-    const picked = await save({
-      title: target === "stdout_log" ? "选择 stdout 日志文件" : "选择 stderr 日志文件",
-      defaultPath:
-        form[target] || (form.cwd ? `${form.cwd.replace(/[\\/]+$/, "")}\\logs\\${fallbackName}` : fallbackName),
-      filters: [{ name: "Log", extensions: ["log", "txt"] }]
+  async function pickLogDir() {
+    const picked = await open({
+      directory: true,
+      multiple: false,
+      title: "选择日志目录",
+      defaultPath: form.log_dir || buildDefaultLogDir(form.cwd) || undefined
     });
 
-    if (!picked) return;
-    updateFormField(target, picked);
+    if (typeof picked !== "string" || !picked) return;
+    updateFormField("log_dir", picked);
   }
 
   async function toggleWindowMaximize() {
@@ -557,6 +557,16 @@ export default function App() {
       x: event.clientX - rect.left,
       y: event.clientY - rect.top
     });
+  }
+
+  function scrollLogTo(position: "top" | "bottom") {
+    const node = logViewRef.current;
+    if (!node) return;
+    if (position === "top") {
+      node.scrollTop = 0;
+    } else {
+      node.scrollTop = node.scrollHeight;
+    }
   }
 
   return (
@@ -739,29 +749,23 @@ export default function App() {
               </label>
 
               <label className="wide">
-                <span>stdout 日志</span>
+                <span>日志目录</span>
                 <div className="field-actions">
-                  <input value={form.stdout_log} onChange={(event) => updateFormField("stdout_log", event.target.value)} placeholder="E:\\project\\backend\\logs\\backend.out.log" />
-                  <button type="button" className="icon-btn" title="选择 stdout 日志" aria-label="选择 stdout 日志" onClick={() => void pickLogFile("stdout_log")}>
+                  <input value={form.log_dir} onChange={(event) => updateFormField("log_dir", event.target.value)} placeholder="E:\\project\\backend\\logs" />
+                  <button type="button" className="icon-btn" title="选择日志目录" aria-label="选择日志目录" onClick={() => void pickLogDir()}>
                     <Icon path="M4 7.5h5l2 2H20v7.5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zM4 7.5V6a2 2 0 0 1 2-2h3l2 2" />
                   </button>
-                  <button type="button" className="icon-btn" title="打开 stdout 日志" aria-label="打开 stdout 日志" disabled={!form.stdout_log.trim()} onClick={() => void openPath(form.stdout_log)}>
+                  <button type="button" className="icon-btn" title="生成日志目录" aria-label="生成日志目录" onClick={applyLogPaths}>
+                    <Icon path="M12 3l1.8 4.7L19 9.5l-4 3.2 1.2 5.3L12 15.2 7.8 18l1.2-5.3-4-3.2 5.2-1.8z" />
+                  </button>
+                  <button type="button" className="icon-btn" title="打开日志目录" aria-label="打开日志目录" disabled={!form.log_dir.trim()} onClick={() => void openPath(form.log_dir)}>
                     <Icon path="M14 5h5v5M10 14 19 5M19 14v4a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h4" />
                   </button>
                 </div>
               </label>
 
               <label className="wide">
-                <span>stderr 日志</span>
-                <div className="field-actions">
-                  <input value={form.stderr_log} onChange={(event) => updateFormField("stderr_log", event.target.value)} placeholder="E:\\project\\backend\\logs\\backend.err.log" />
-                  <button type="button" className="icon-btn" title="选择 stderr 日志" aria-label="选择 stderr 日志" onClick={() => void pickLogFile("stderr_log")}>
-                    <Icon path="M4 7.5h5l2 2H20v7.5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zM4 7.5V6a2 2 0 0 1 2-2h3l2 2" />
-                  </button>
-                  <button type="button" className="icon-btn" title="打开 stderr 日志" aria-label="打开 stderr 日志" disabled={!form.stderr_log.trim()} onClick={() => void openPath(form.stderr_log)}>
-                    <Icon path="M14 5h5v5M10 14 19 5M19 14v4a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h4" />
-                  </button>
-                </div>
+                <span>当前日志文件由每次启动自动生成，避免单个日志文件持续膨胀。</span>
               </label>
 
               <label>
@@ -845,13 +849,19 @@ export default function App() {
               <button type="button" onClick={() => void readActiveLog()}>
                 刷新
               </button>
+              <button type="button" onClick={() => scrollLogTo("top")}>
+                置顶
+              </button>
+              <button type="button" onClick={() => scrollLogTo("bottom")}>
+                置底
+              </button>
               <button type="button" disabled={!activeLogPath} onClick={() => void openPath(activeLogPath)}>
                 打开位置
               </button>
               <span className="log-follow">实时跟随中</span>
             </div>
 
-            <pre className="log-view">{logText || "等待日志输出..."}</pre>
+            <pre ref={logViewRef} className="log-view">{logText || "等待日志输出..."}</pre>
           </section>
         </div>
       ) : null}

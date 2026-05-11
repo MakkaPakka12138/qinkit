@@ -471,6 +471,11 @@ textarea:focus {
 
 .modal--log {
   width: min(980px, calc(100vw - 48px));
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - var(--titlebar-height) - 40px);
+  max-height: calc(100vh - var(--titlebar-height) - 40px);
+  overflow: hidden;
 }
 
 .modal__head,
@@ -618,6 +623,7 @@ textarea:focus {
   flex-wrap: wrap;
   justify-content: flex-start;
   margin-bottom: 12px;
+  flex-shrink: 0;
 }
 
 .log-follow {
@@ -626,7 +632,8 @@ textarea:focus {
 }
 
 .log-view {
-  min-height: 420px;
+  flex: 1;
+  min-height: 0;
   margin: 0;
   overflow: auto;
   border: 1px solid #dbe4fb;
