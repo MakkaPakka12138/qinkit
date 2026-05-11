@@ -18,7 +18,7 @@ import type {
   ServiceView,
   ThemeMode
 } from "./types";
-import { blankForm, buildDefaultLogDir, normalizeService, toServiceConfig } from "./utils/service";
+import { blankForm, buildDefaultLogDir, generateServiceId, normalizeService, toServiceConfig } from "./utils/service";
 
 const appWindow = getCurrentWindow();
 const THEME_STORAGE_KEY = "lite-service-manager-theme";
@@ -341,20 +341,12 @@ export default function App() {
 
   function openCopyModal(service: ServiceView) {
     const existingIds = new Set(servicesRef.current.map((item) => item.id));
-    const baseId = `${service.id}_copy`;
-    let nextId = baseId;
-    let suffix = 2;
-
-    while (existingIds.has(nextId)) {
-      nextId = `${baseId}_${suffix}`;
-      suffix += 1;
-    }
 
     setEditorMode("create");
     setEditingSourceId("");
     setForm({
       ...toServiceConfig(service),
-      id: nextId,
+      id: generateServiceId(existingIds),
       name: `${service.name} 副本`,
       stdout_log: "",
       stderr_log: ""
@@ -410,7 +402,8 @@ export default function App() {
   async function saveCurrent() {
     setBusy(true);
     try {
-      const item = normalizeService(form);
+      const normalized = normalizeService(form);
+      const item = editorMode === "edit" && editingSourceId ? { ...normalized, id: editingSourceId } : normalized;
       if (!item.command) {
         throw new Error("启动命令不能为空。");
       }

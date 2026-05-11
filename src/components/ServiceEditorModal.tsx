@@ -41,11 +41,6 @@ export function ServiceEditorModal({
 
         <div className="form-grid">
           <label>
-            <span>服务 ID</span>
-            <input value={form.id} onChange={(event) => onUpdateField("id", event.target.value)} placeholder="backend" />
-          </label>
-
-          <label>
             <span>显示名称</span>
             <input value={form.name} onChange={(event) => onUpdateField("name", event.target.value)} placeholder="ERP 后端" />
           </label>

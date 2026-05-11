@@ -1,5 +1,19 @@
 import type { ServiceConfig, ServiceForm, ServiceView } from "../types";
 
+export function generateServiceId(existingIds: Iterable<string> = []) {
+  const existing = new Set(existingIds);
+
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const suffix = Math.random().toString(36).slice(2, 8);
+    const id = `svc_${Date.now().toString(36)}_${suffix}`;
+    if (!existing.has(id)) {
+      return id;
+    }
+  }
+
+  return `svc_${Date.now().toString(36)}_${crypto.randomUUID()}`;
+}
+
 export function toServiceConfig(service: ServiceConfig | ServiceView): ServiceConfig {
   const { id, name, group_name, command, cwd, enabled, auto_start, auto_restart, restart_delay_seconds, log_dir, stdout_log, stderr_log } =
     service;
@@ -26,7 +40,7 @@ export function buildDefaultLogDir(cwd: string) {
 }
 
 export function blankForm(): ServiceForm {
-  const id = `svc_${Date.now()}`;
+  const id = generateServiceId();
   return {
     id,
     name: "新服务",
@@ -52,7 +66,7 @@ function normalizeRestartDelaySeconds(value: ServiceForm["restart_delay_seconds"
 }
 
 export function normalizeService(input: ServiceForm): ServiceConfig {
-  const id = input.id.trim() || `svc_${Date.now()}`;
+  const id = input.id.trim() || generateServiceId();
   return {
     ...input,
     id,
