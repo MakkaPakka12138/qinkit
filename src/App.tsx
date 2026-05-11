@@ -33,6 +33,9 @@ export default function App() {
   const logServiceIdRef = useRef("");
   const activeLogTypeRef = useRef<LogType>("stdout");
   const noticeTimerRef = useRef<number | undefined>(undefined);
+  const persistedServicesRef = useRef<ServiceView[]>([]);
+  const orderSaveTimerRef = useRef<number | undefined>(undefined);
+  const orderSaveVersionRef = useRef(0);
 
   const [services, setServices] = useState<ServiceView[]>([]);
   const [busy, setBusy] = useState(false);
@@ -160,6 +163,9 @@ export default function App() {
       if (noticeTimerRef.current) {
         window.clearTimeout(noticeTimerRef.current);
       }
+      if (orderSaveTimerRef.current) {
+        window.clearTimeout(orderSaveTimerRef.current);
+      }
       unlistenResize?.();
     };
   }, []);
@@ -231,6 +237,7 @@ export default function App() {
 
   function applyServiceList(list: ServiceView[]) {
     const serviceIdSet = new Set(list.map((item) => item.id));
+    persistedServicesRef.current = list;
     setServices(list);
     setSelectedServiceIds((current) => current.filter((id) => serviceIdSet.has(id)));
 
@@ -262,31 +269,54 @@ export default function App() {
   }
 
   function flattenServiceGroups(groups: ServiceGroupSection[]) {
-    return groups.flatMap((group) => group.services.map((service) => toServiceConfig(service)));
+    return groups.flatMap((group) => group.services);
   }
 
-  async function saveServiceOrder(nextServices: ServiceConfig[], message: string) {
-    setBusy(true);
+  function scheduleServiceOrderSave(nextServices: ServiceView[], message: string) {
+    const version = orderSaveVersionRef.current + 1;
+    orderSaveVersionRef.current = version;
+
+    if (orderSaveTimerRef.current) {
+      window.clearTimeout(orderSaveTimerRef.current);
+    }
+
+    orderSaveTimerRef.current = window.setTimeout(() => {
+      orderSaveTimerRef.current = undefined;
+      void persistServiceOrder(nextServices, version, message);
+    }, 120);
+  }
+
+  async function persistServiceOrder(nextServices: ServiceView[], version: number, message: string) {
     try {
-      await invoke("save_services", { services: nextServices });
-      await refresh(true);
-      flash(message);
+      await invoke("save_services", { services: nextServices.map((service) => toServiceConfig(service)) });
+      if (version === orderSaveVersionRef.current) {
+        persistedServicesRef.current = nextServices;
+        flash(message);
+      }
     } catch (error) {
-      flash(String(error), true);
-    } finally {
-      setBusy(false);
+      if (version === orderSaveVersionRef.current) {
+        servicesRef.current = persistedServicesRef.current;
+        setServices(persistedServicesRef.current);
+        flash(String(error), true);
+      }
     }
   }
 
-  async function moveGroup(groupKey: string, direction: MoveDirection) {
+  function applyServiceOrder(nextServices: ServiceView[], message: string) {
+    servicesRef.current = nextServices;
+    setServices(nextServices);
+    scheduleServiceOrderSave(nextServices, message);
+  }
+
+  function moveGroup(groupKey: string, direction: MoveDirection) {
     const groupIndex = groupedServices.findIndex((group) => group.key === groupKey);
     const nextGroups = reorderItem(groupedServices, groupIndex, direction);
     if (!nextGroups) return;
 
-    await saveServiceOrder(flattenServiceGroups(nextGroups), "分组顺序已更新。");
+    applyServiceOrder(flattenServiceGroups(nextGroups), "分组顺序已更新。");
   }
 
-  async function moveService(serviceId: string, direction: MoveDirection) {
+  function moveService(serviceId: string, direction: MoveDirection) {
     const groupIndex = groupedServices.findIndex((group) =>
       group.services.some((service) => service.id === serviceId)
     );
@@ -299,7 +329,7 @@ export default function App() {
     const nextGroups = groupedServices.map((group, index) =>
       index === groupIndex ? { ...group, services: nextServices } : group
     );
-    await saveServiceOrder(flattenServiceGroups(nextGroups), "服务顺序已更新。");
+    applyServiceOrder(flattenServiceGroups(nextGroups), "服务顺序已更新。");
   }
 
   function openCreateModal() {
