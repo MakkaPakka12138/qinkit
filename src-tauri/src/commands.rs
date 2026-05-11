@@ -53,6 +53,7 @@ pub(crate) fn list_services(
             ServiceView {
                 id: svc.id,
                 name: svc.name,
+                group_name: svc.group_name,
                 command: svc.command,
                 cwd: svc.cwd,
                 enabled: svc.enabled,

@@ -1,6 +1,7 @@
 export type ServiceConfig = {
   id: string;
   name: string;
+  group_name: string;
   command: string;
   cwd: string;
   enabled: boolean;

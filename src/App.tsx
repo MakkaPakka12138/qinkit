@@ -6,7 +6,7 @@ import logoPng from "./assets/logo.png";
 import { ActionPanel } from "./components/ActionPanel";
 import { LogModal } from "./components/LogModal";
 import { ServiceEditorModal } from "./components/ServiceEditorModal";
-import { ServiceList } from "./components/ServiceList";
+import { ServiceList, type ServiceGroupSection } from "./components/ServiceList";
 import { Titlebar } from "./components/Titlebar";
 import type {
   BatchServiceResult,
@@ -70,6 +70,37 @@ export default function App() {
   }, [activeLogType, logService]);
   const selectedServiceIdSet = useMemo(() => new Set(selectedServiceIds), [selectedServiceIds]);
   const selectedCount = selectedServiceIds.length;
+  const groupedServices = useMemo<ServiceGroupSection[]>(() => {
+    const groups = new Map<string, ServiceGroupSection>();
+
+    for (const service of services) {
+      const key = service.group_name.trim();
+      const label = key || "未分组";
+      const current =
+        groups.get(key) ??
+        {
+          key,
+          label,
+          services: [],
+          runningCount: 0,
+          enabledCount: 0,
+          startableIds: []
+        };
+
+      current.services.push(service);
+      if (service.running) {
+        current.runningCount += 1;
+      }
+      if (service.enabled) {
+        current.enabledCount += 1;
+        current.startableIds.push(service.id);
+      }
+
+      groups.set(key, current);
+    }
+
+    return Array.from(groups.values());
+  }, [services]);
 
   useEffect(() => {
     servicesRef.current = services;
@@ -680,6 +711,16 @@ export default function App() {
     setThemeMode((current) => (current === "dark" ? "light" : "dark"));
   }
 
+  async function startGroup(groupKey: string) {
+    const targetGroup = groupedServices.find((group) => group.key === groupKey);
+    await runBatchAction(
+      "start_services",
+      targetGroup?.startableIds ?? [],
+      "当前分组没有可启动的已启用服务。",
+      `启动分组「${targetGroup?.label ?? "未命名"}」`
+    );
+  }
+
   return (
     <main ref={shellRef} className="shell">
       <div className="app-frame">
@@ -732,10 +773,11 @@ export default function App() {
           />
 
           <ServiceList
-            services={services}
+            groups={groupedServices}
             busy={busy}
             selectedServiceIds={selectedServiceIdSet}
             onToggleSelected={toggleSelectedService}
+            onStartGroup={(groupKey) => void startGroup(groupKey)}
             onCopy={openCopyModal}
             onEdit={openEditModal}
             onToggle={(service) => void toggleService(service)}
