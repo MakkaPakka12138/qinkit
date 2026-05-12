@@ -1,4 +1,5 @@
-import type { MoveDirection, ServiceView } from "../types";
+import { useState } from "react";
+import type { ServiceView } from "../types";
 import { Icon } from "./Icon";
 
 export type ServiceGroupSection = {
@@ -23,8 +24,8 @@ type ServiceListProps = {
   onRestartSelected: () => void;
   onToggleSelected: (id: string) => void;
   onToggleGroup: (groupKey: string) => void;
-  onMoveGroup: (groupKey: string, direction: MoveDirection) => void;
-  onMoveService: (serviceId: string, direction: MoveDirection) => void;
+  onReorderGroup: (sourceGroupKey: string, targetGroupKey: string) => void;
+  onReorderService: (sourceServiceId: string, targetServiceId: string) => void;
   onCopy: (service: ServiceView) => void;
   onEdit: (service: ServiceView) => void;
   onToggle: (service: ServiceView) => void;
@@ -46,8 +47,8 @@ export function ServiceList({
   onRestartSelected,
   onToggleSelected,
   onToggleGroup,
-  onMoveGroup,
-  onMoveService,
+  onReorderGroup,
+  onReorderService,
   onCopy,
   onEdit,
   onToggle,
@@ -55,6 +56,40 @@ export function ServiceList({
   onOpenLog,
   onDelete
 }: ServiceListProps) {
+  const [draggingGroupKey, setDraggingGroupKey] = useState("");
+  const [dropGroupKey, setDropGroupKey] = useState("");
+  const [draggingServiceId, setDraggingServiceId] = useState("");
+  const [draggingServiceGroupKey, setDraggingServiceGroupKey] = useState("");
+  const [dropServiceId, setDropServiceId] = useState("");
+
+  function clearGroupDrag() {
+    setDraggingGroupKey("");
+    setDropGroupKey("");
+  }
+
+  function clearServiceDrag() {
+    setDraggingServiceId("");
+    setDraggingServiceGroupKey("");
+    setDropServiceId("");
+  }
+
+  function startGroupDrag(event: React.DragEvent<HTMLButtonElement>, groupKey: string) {
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", groupKey);
+    clearServiceDrag();
+    setDraggingGroupKey(groupKey);
+    setDropGroupKey("");
+  }
+
+  function startServiceDrag(event: React.DragEvent<HTMLButtonElement>, serviceId: string, groupKey: string) {
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", serviceId);
+    clearGroupDrag();
+    setDraggingServiceId(serviceId);
+    setDraggingServiceGroupKey(groupKey);
+    setDropServiceId("");
+  }
+
   return (
     <section className="board">
       <div className="board__head">
@@ -89,9 +124,26 @@ export function ServiceList({
       <div className="service-list">
         {groups.length === 0 ? <div className="empty">还没有服务，先新增一个服务。</div> : null}
 
-        {groups.map((group, groupIndex) => (
-          <section key={group.key} className="service-group">
-            <header className="service-group__head">
+        {groups.map((group) => (
+          <section
+            key={group.key}
+            className={`service-group${draggingGroupKey === group.key ? " is-dragging" : ""}${dropGroupKey === group.key ? " is-drop-target" : ""}`}
+          >
+            <header
+              className="service-group__head"
+              onDragOver={(event) => {
+                if (!draggingGroupKey || draggingGroupKey === group.key) return;
+                event.preventDefault();
+                event.dataTransfer.dropEffect = "move";
+                setDropGroupKey(group.key);
+              }}
+              onDrop={(event) => {
+                if (!draggingGroupKey || draggingGroupKey === group.key) return;
+                event.preventDefault();
+                onReorderGroup(draggingGroupKey, group.key);
+                clearGroupDrag();
+              }}
+            >
               <div className="service-group__title">
                 <strong>{group.label}</strong>
                 <span>总数/运行中 {group.services.length}/{group.runningCount}</span>
@@ -99,23 +151,15 @@ export function ServiceList({
               <div className="service-group__actions">
                 <button
                   type="button"
-                  className="icon-compact-btn"
-                  title="上移分组"
-                  aria-label="上移分组"
-                  disabled={busy || groupIndex === 0}
-                  onClick={() => onMoveGroup(group.key, "up")}
+                  className="icon-compact-btn drag-handle-btn"
+                  title="拖拽排序分组"
+                  aria-label="拖拽排序分组"
+                  draggable={!busy}
+                  disabled={busy}
+                  onDragStart={(event) => startGroupDrag(event, group.key)}
+                  onDragEnd={clearGroupDrag}
                 >
-                  <Icon path="m18 15-6-6-6 6" />
-                </button>
-                <button
-                  type="button"
-                  className="icon-compact-btn"
-                  title="下移分组"
-                  aria-label="下移分组"
-                  disabled={busy || groupIndex === groups.length - 1}
-                  onClick={() => onMoveGroup(group.key, "down")}
-                >
-                  <Icon path="m6 9 6 6 6-6" />
+                  <Icon path="M9 5h.01M9 9h.01M9 13h.01M9 17h.01M15 5h.01M15 9h.01M15 13h.01M15 17h.01" />
                 </button>
                 <button
                   type="button"
@@ -140,10 +184,34 @@ export function ServiceList({
             </header>
 
             <div className="service-group__body">
-              {group.services.map((service, serviceIndex) => (
+              {group.services.map((service) => (
                 <article
                   key={service.id}
-                  className={`service-row${selectedServiceIds.has(service.id) ? " is-selected" : ""}`}
+                  className={`service-row${selectedServiceIds.has(service.id) ? " is-selected" : ""}${draggingServiceId === service.id ? " is-dragging" : ""}${dropServiceId === service.id ? " is-drop-target" : ""}`}
+                  onDragOver={(event) => {
+                    if (
+                      !draggingServiceId ||
+                      draggingServiceId === service.id ||
+                      draggingServiceGroupKey !== group.key
+                    ) {
+                      return;
+                    }
+                    event.preventDefault();
+                    event.dataTransfer.dropEffect = "move";
+                    setDropServiceId(service.id);
+                  }}
+                  onDrop={(event) => {
+                    if (
+                      !draggingServiceId ||
+                      draggingServiceId === service.id ||
+                      draggingServiceGroupKey !== group.key
+                    ) {
+                      return;
+                    }
+                    event.preventDefault();
+                    onReorderService(draggingServiceId, service.id);
+                    clearServiceDrag();
+                  }}
                 >
                   <label className="service-row__select">
                     <input
@@ -165,23 +233,15 @@ export function ServiceList({
                   <div className="service-row__actions">
                     <button
                       type="button"
-                      className="icon-compact-btn"
-                      title="上移服务"
-                      aria-label="上移服务"
-                      disabled={busy || serviceIndex === 0}
-                      onClick={() => onMoveService(service.id, "up")}
+                      className="icon-compact-btn drag-handle-btn"
+                      title="拖拽排序服务"
+                      aria-label="拖拽排序服务"
+                      draggable={!busy}
+                      disabled={busy}
+                      onDragStart={(event) => startServiceDrag(event, service.id, group.key)}
+                      onDragEnd={clearServiceDrag}
                     >
-                      <Icon path="m18 15-6-6-6 6" />
-                    </button>
-                    <button
-                      type="button"
-                      className="icon-compact-btn"
-                      title="下移服务"
-                      aria-label="下移服务"
-                      disabled={busy || serviceIndex === group.services.length - 1}
-                      onClick={() => onMoveService(service.id, "down")}
-                    >
-                      <Icon path="m6 9 6 6 6-6" />
+                      <Icon path="M9 5h.01M9 9h.01M9 13h.01M9 17h.01M15 5h.01M15 9h.01M15 13h.01M15 17h.01" />
                     </button>
                     <button
                       type="button"

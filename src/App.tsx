@@ -12,7 +12,6 @@ import type {
   BatchServiceResult,
   ImportServicesResult,
   LogType,
-  MoveDirection,
   ServiceForm,
   ServiceView,
   ThemeMode
@@ -314,18 +313,14 @@ export default function App() {
     setForm((current) => ({ ...current, [key]: value }));
   }
 
-  function movedIndex(index: number, direction: MoveDirection) {
-    return direction === "up" ? index - 1 : index + 1;
-  }
-
-  function reorderItem<T>(items: T[], index: number, direction: MoveDirection) {
-    const targetIndex = movedIndex(index, direction);
-    if (index < 0 || targetIndex < 0 || targetIndex >= items.length) {
+  function moveItem<T>(items: T[], fromIndex: number, toIndex: number) {
+    if (fromIndex < 0 || toIndex < 0 || fromIndex >= items.length || toIndex >= items.length || fromIndex === toIndex) {
       return null;
     }
 
     const next = [...items];
-    [next[index], next[targetIndex]] = [next[targetIndex], next[index]];
+    const [moved] = next.splice(fromIndex, 1);
+    next.splice(toIndex, 0, moved);
     return next;
   }
 
@@ -368,26 +363,32 @@ export default function App() {
     scheduleServiceOrderSave(nextServices);
   }
 
-  function moveGroup(groupKey: string, direction: MoveDirection) {
-    const groupIndex = groupedServices.findIndex((group) => group.key === groupKey);
-    const nextGroups = reorderItem(groupedServices, groupIndex, direction);
+  function reorderGroup(sourceGroupKey: string, targetGroupKey: string) {
+    const sourceIndex = groupedServices.findIndex((group) => group.key === sourceGroupKey);
+    const targetIndex = groupedServices.findIndex((group) => group.key === targetGroupKey);
+    const nextGroups = moveItem(groupedServices, sourceIndex, targetIndex);
     if (!nextGroups) return;
 
     applyServiceOrder(flattenServiceGroups(nextGroups));
   }
 
-  function moveService(serviceId: string, direction: MoveDirection) {
-    const groupIndex = groupedServices.findIndex((group) =>
-      group.services.some((service) => service.id === serviceId)
+  function reorderService(sourceServiceId: string, targetServiceId: string) {
+    const sourceGroupIndex = groupedServices.findIndex((group) =>
+      group.services.some((service) => service.id === sourceServiceId)
     );
-    if (groupIndex < 0) return;
+    const targetGroupIndex = groupedServices.findIndex((group) =>
+      group.services.some((service) => service.id === targetServiceId)
+    );
+    if (sourceGroupIndex < 0 || targetGroupIndex < 0 || sourceGroupIndex !== targetGroupIndex) return;
 
-    const serviceIndex = groupedServices[groupIndex].services.findIndex((service) => service.id === serviceId);
-    const nextServices = reorderItem(groupedServices[groupIndex].services, serviceIndex, direction);
+    const targetGroup = groupedServices[sourceGroupIndex];
+    const sourceIndex = targetGroup.services.findIndex((service) => service.id === sourceServiceId);
+    const targetIndex = targetGroup.services.findIndex((service) => service.id === targetServiceId);
+    const nextServices = moveItem(targetGroup.services, sourceIndex, targetIndex);
     if (!nextServices) return;
 
     const nextGroups = groupedServices.map((group, index) =>
-      index === groupIndex ? { ...group, services: nextServices } : group
+      index === sourceGroupIndex ? { ...group, services: nextServices } : group
     );
     applyServiceOrder(flattenServiceGroups(nextGroups));
   }
@@ -952,8 +953,8 @@ export default function App() {
             onRestartSelected={() => void restartSelected()}
             onToggleSelected={toggleSelectedService}
             onToggleGroup={(groupKey) => void toggleGroup(groupKey)}
-            onMoveGroup={(groupKey, direction) => void moveGroup(groupKey, direction)}
-            onMoveService={(serviceId, direction) => void moveService(serviceId, direction)}
+            onReorderGroup={(sourceGroupKey, targetGroupKey) => void reorderGroup(sourceGroupKey, targetGroupKey)}
+            onReorderService={(sourceServiceId, targetServiceId) => void reorderService(sourceServiceId, targetServiceId)}
             onCopy={openCopyModal}
             onEdit={openEditModal}
             onToggle={(service) => void toggleService(service)}
