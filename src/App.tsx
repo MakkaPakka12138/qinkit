@@ -12,6 +12,7 @@ import type {
   BatchServiceResult,
   ImportServicesResult,
   LogType,
+  MoveDirection,
   ServiceForm,
   ServiceView,
   ThemeMode
@@ -363,33 +364,16 @@ export default function App() {
     scheduleServiceOrderSave(nextServices);
   }
 
-  function reorderGroup(sourceGroupKey: string, targetGroupKey: string) {
-    const sourceIndex = groupedServices.findIndex((group) => group.key === sourceGroupKey);
-    const targetIndex = groupedServices.findIndex((group) => group.key === targetGroupKey);
+  function movedIndex(index: number, direction: MoveDirection) {
+    return direction === "up" ? index - 1 : index + 1;
+  }
+
+  function moveGroup(groupKey: string, direction: MoveDirection) {
+    const sourceIndex = groupedServices.findIndex((group) => group.key === groupKey);
+    const targetIndex = movedIndex(sourceIndex, direction);
     const nextGroups = moveItem(groupedServices, sourceIndex, targetIndex);
     if (!nextGroups) return;
 
-    applyServiceOrder(flattenServiceGroups(nextGroups));
-  }
-
-  function reorderService(sourceServiceId: string, targetServiceId: string) {
-    const sourceGroupIndex = groupedServices.findIndex((group) =>
-      group.services.some((service) => service.id === sourceServiceId)
-    );
-    const targetGroupIndex = groupedServices.findIndex((group) =>
-      group.services.some((service) => service.id === targetServiceId)
-    );
-    if (sourceGroupIndex < 0 || targetGroupIndex < 0 || sourceGroupIndex !== targetGroupIndex) return;
-
-    const targetGroup = groupedServices[sourceGroupIndex];
-    const sourceIndex = targetGroup.services.findIndex((service) => service.id === sourceServiceId);
-    const targetIndex = targetGroup.services.findIndex((service) => service.id === targetServiceId);
-    const nextServices = moveItem(targetGroup.services, sourceIndex, targetIndex);
-    if (!nextServices) return;
-
-    const nextGroups = groupedServices.map((group, index) =>
-      index === sourceGroupIndex ? { ...group, services: nextServices } : group
-    );
     applyServiceOrder(flattenServiceGroups(nextGroups));
   }
 
@@ -471,18 +455,23 @@ export default function App() {
       }
 
       const pureServices = servicesRef.current.map((service) => toServiceConfig(service));
-      const withoutSource = editingSourceId
-        ? pureServices.filter((service) => service.id !== editingSourceId)
-        : pureServices;
-      const index = withoutSource.findIndex((service) => service.id === item.id);
+      const sourceIndex = editingSourceId
+        ? pureServices.findIndex((service) => service.id === editingSourceId)
+        : -1;
+      const nextServices = [...pureServices];
 
-      if (index >= 0) {
-        withoutSource[index] = item;
+      if (sourceIndex >= 0) {
+        nextServices[sourceIndex] = item;
       } else {
-        withoutSource.push(item);
+        const existingIndex = nextServices.findIndex((service) => service.id === item.id);
+        if (existingIndex >= 0) {
+          nextServices[existingIndex] = item;
+        } else {
+          nextServices.push(item);
+        }
       }
 
-      await invoke("save_services", { services: withoutSource });
+      await invoke("save_services", { services: nextServices });
       setEditorOpen(false);
       await refresh({ quiet: true });
       flash(editorMode === "create" ? "服务已新增。" : "服务已更新。");
@@ -953,8 +942,7 @@ export default function App() {
             onRestartSelected={() => void restartSelected()}
             onToggleSelected={toggleSelectedService}
             onToggleGroup={(groupKey) => void toggleGroup(groupKey)}
-            onReorderGroup={(sourceGroupKey, targetGroupKey) => void reorderGroup(sourceGroupKey, targetGroupKey)}
-            onReorderService={(sourceServiceId, targetServiceId) => void reorderService(sourceServiceId, targetServiceId)}
+            onMoveGroup={(groupKey, direction) => void moveGroup(groupKey, direction)}
             onCopy={openCopyModal}
             onEdit={openEditModal}
             onToggle={(service) => void toggleService(service)}
