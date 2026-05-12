@@ -598,8 +598,9 @@ textarea:focus {
   justify-content: space-between;
   gap: 12px;
   min-height: 54px;
-  padding: 12px 2px 12px 10px;
-  background: linear-gradient(90deg, var(--surface-soft), transparent 76%);
+  padding: 12px 10px;
+  background: var(--surface-soft);
+  border-radius: 10px;
 }
 
 .service-group__actions {
@@ -737,6 +738,45 @@ textarea:focus {
 .theme-toggle .icon {
   width: 13px;
   height: 13px;
+}
+
+.toast-layer {
+  position: fixed;
+  top: calc(var(--titlebar-height) + 16px);
+  right: 20px;
+  z-index: 180;
+  pointer-events: none;
+}
+
+.toast {
+  min-width: 240px;
+  max-width: min(420px, calc(100vw - 40px));
+  border: 1px solid var(--notice-border);
+  border-radius: 12px;
+  background: var(--notice-good-bg);
+  color: var(--notice-good-text);
+  box-shadow: 0 14px 32px rgba(18, 28, 48, 0.18);
+  padding: 12px 14px;
+  font-size: 13px;
+  line-height: 1.45;
+  animation: toast-in 0.18s ease-out;
+}
+
+.toast--error {
+  background: var(--notice-bad-bg);
+  color: var(--notice-bad-text);
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 .empty {

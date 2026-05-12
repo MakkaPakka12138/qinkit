@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { confirm, message, open } from "@tauri-apps/plugin-dialog";
+import { confirm, open } from "@tauri-apps/plugin-dialog";
 import { useEffect, useMemo, useRef, useState } from "react";
 import logoPng from "./assets/logo.png";
 import { ActionPanel } from "./components/ActionPanel";
@@ -48,7 +48,7 @@ export default function App() {
   const servicesRef = useRef<ServiceView[]>([]);
   const logServiceIdRef = useRef("");
   const activeLogTypeRef = useRef<LogType>("stdout");
-  const dialogQueueRef = useRef(Promise.resolve());
+  const noticeTimerRef = useRef<number | undefined>(undefined);
   const persistedServicesRef = useRef<ServiceView[]>([]);
   const orderSaveTimerRef = useRef<number | undefined>(undefined);
   const orderSaveVersionRef = useRef(0);
@@ -58,6 +58,7 @@ export default function App() {
 
   const [services, setServices] = useState<ServiceView[]>([]);
   const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<{ text: string; isError: boolean } | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
   const [editorMode, setEditorMode] = useState<"create" | "edit">("create");
   const [editingSourceId, setEditingSourceId] = useState("");
@@ -174,6 +175,9 @@ export default function App() {
 
     return () => {
       clearProcessScanTimer();
+      if (noticeTimerRef.current) {
+        window.clearTimeout(noticeTimerRef.current);
+      }
       if (orderSaveTimerRef.current) {
         window.clearTimeout(orderSaveTimerRef.current);
       }
@@ -269,15 +273,14 @@ export default function App() {
   }
 
   function flash(text: string, isError = false) {
-    dialogQueueRef.current = dialogQueueRef.current
-      .catch(() => undefined)
-      .then(() =>
-        message(text, {
-          title: isError ? "操作失败" : "操作完成",
-          kind: isError ? "error" : "info"
-        }).then(() => undefined)
-      )
-      .catch(() => undefined);
+    if (noticeTimerRef.current) {
+      window.clearTimeout(noticeTimerRef.current);
+    }
+
+    setNotice({ text, isError });
+    noticeTimerRef.current = window.setTimeout(() => {
+      setNotice((current) => (current?.text === text ? null : current));
+    }, 3200);
   }
 
   async function refresh({ quiet = false, scanProcesses = false }: RefreshOptions = {}) {
@@ -918,6 +921,11 @@ export default function App() {
           onMouseLeave={() => setGlowVisible(false)}
         >
           <div ref={cursorGlowRef} className={`cursor-glow${glowVisible ? " is-visible" : ""}`} />
+          {notice ? (
+            <div className="toast-layer" aria-live="polite" aria-atomic="true">
+              <div className={`toast${notice.isError ? " toast--error" : ""}`}>{notice.text}</div>
+            </div>
+          ) : null}
           <ActionPanel
             serviceCount={services.length}
             runningCount={runningCount}

@@ -217,11 +217,25 @@ export function ServiceList({
                         <Icon path="M8 6.5v11l8-5.5-8-5.5Z" />
                       )}
                     </button>
-                    <button type="button" className="compact-btn" disabled={busy} onClick={() => onRestart(service.id)}>
-                      重启
+                    <button
+                      type="button"
+                      className="icon-compact-btn"
+                      title="重启"
+                      aria-label="重启"
+                      disabled={busy}
+                      onClick={() => onRestart(service.id)}
+                    >
+                      <Icon path="M20 11a8 8 0 1 0 2 5.3M20 11V5m0 6h-6" />
                     </button>
-                    <button type="button" className="compact-btn" disabled={busy} onClick={() => onOpenLog(service)}>
-                      日志
+                    <button
+                      type="button"
+                      className="icon-compact-btn"
+                      title="日志"
+                      aria-label="日志"
+                      disabled={busy}
+                      onClick={() => onOpenLog(service)}
+                    >
+                      <Icon path="M8 4h8l4 4v12H8zM16 4v4h4M11 13h6M11 17h6" />
                     </button>
                     <button
                       type="button"
