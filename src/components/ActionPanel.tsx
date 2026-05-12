@@ -29,7 +29,7 @@ export function ActionPanel({
     <section className="action-panel">
       <div className="action-strip">
         <div className="stats-bar">
-          <span>总数 {serviceCount}</span>
+          <span>服务 {serviceCount}</span>
           <span>运行中 {runningCount}</span>
         </div>
         <div className="action-strip__buttons action-strip__buttons--wrap">

@@ -92,7 +92,7 @@ export function ServiceList({
             <header className="service-group__head">
               <div className="service-group__title">
                 <strong>{group.label}</strong>
-                <span>总数/运行中 {group.services.length}/{group.runningCount}</span>
+                <span> {group.services.length}/{group.runningCount}</span>
               </div>
               <div className="service-group__actions">
                 <button
@@ -203,7 +203,7 @@ export function ServiceList({
                       disabled={busy}
                       onClick={() => onRestart(service.id)}
                     >
-                      <Icon path="M20 11a8 8 0 1 0 2 5.3M20 11V5m0 6h-6" />
+                      <Icon path="M21 3v6h-6M3 21v-6h6M21 9a9 9 0 0 0-15-4.5L3 7.5M3 15a9 9 0 0 0 15 4.5l3-3" />
                     </button>
                     <button
                       type="button"

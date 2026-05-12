@@ -241,16 +241,16 @@ button.compact-btn {
 button.icon-compact-btn {
   display: inline-grid;
   place-items: center;
-  width: 30px;
-  min-width: 30px;
-  height: 30px;
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
   padding: 0;
   border-radius: 8px;
 }
 
 button.icon-compact-btn .icon {
-  width: 14px;
-  height: 14px;
+  width: 15px;
+  height: 15px;
 }
 
 button.icon-compact-btn--danger {
