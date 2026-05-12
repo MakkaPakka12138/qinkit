@@ -28,13 +28,13 @@
   --scroll-track: #f2f5ff;
   --scroll-thumb-start: #9eb9ff;
   --scroll-thumb-end: #7ea3ff;
-  --button-bg: #f8faff;
-  --button-hover-bg: #eef4ff;
-  --button-hover-border: #bfd0ff;
-  --button-primary-bg: #1f2430;
-  --button-primary-alt-bg: #383e4d;
+  --button-bg: #eef3ff;
+  --button-hover-bg: #e4ebfb;
+  --button-hover-border: #bfd0ee;
+  --button-primary-bg: #536a93;
+  --button-primary-alt-bg: #6279a2;
   --button-primary-text: #ffffff;
-  --button-ghost-soft-bg: #f3f6ff;
+  --button-ghost-soft-bg: #eef3ff;
   --window-btn-bg: #ffffff;
   --window-btn-border: #e6e9f0;
   --window-btn-text: #60677a;
@@ -106,13 +106,13 @@
   --scroll-track: #151b24;
   --scroll-thumb-start: #4d638b;
   --scroll-thumb-end: #354864;
-  --button-bg: #1a2130;
-  --button-hover-bg: #232c3d;
-  --button-hover-border: #43516c;
-  --button-primary-bg: #e8eefc;
-  --button-primary-alt-bg: #cdd8ef;
-  --button-primary-text: #111721;
-  --button-ghost-soft-bg: #1c2535;
+  --button-bg: #1c2740;
+  --button-hover-bg: #24314d;
+  --button-hover-border: #465e84;
+  --button-primary-bg: #3d5885;
+  --button-primary-alt-bg: #4a6794;
+  --button-primary-text: #eef4ff;
+  --button-ghost-soft-bg: #1c2740;
   --window-btn-bg: #1a2230;
   --window-btn-border: #313b4d;
   --window-btn-text: #c7d2e6;
@@ -251,6 +251,19 @@ button.icon-compact-btn {
 button.icon-compact-btn .icon {
   width: 14px;
   height: 14px;
+}
+
+button.icon-compact-btn--danger {
+  border-color: var(--danger-soft-border);
+  background: var(--danger-soft-bg);
+  color: var(--danger);
+}
+
+button.icon-compact-btn--danger:hover:not(:disabled),
+button.icon-compact-btn--danger:focus-visible {
+  background: var(--danger-soft-hover);
+  border-color: var(--danger-soft-border);
+  color: var(--danger);
 }
 
 button.window-btn {
@@ -566,23 +579,6 @@ textarea:focus {
   font-size: 13px;
 }
 
-.notice {
-  margin: 0 0 12px;
-  border: 1px solid var(--notice-border);
-  border-radius: 16px;
-  padding: 11px 14px;
-}
-
-.notice--good {
-  background: var(--notice-good-bg);
-  color: var(--notice-good-text);
-}
-
-.notice--bad {
-  background: var(--notice-bad-bg);
-  color: var(--notice-bad-text);
-}
-
 .service-list {
   display: flex;
   flex-direction: column;
@@ -645,7 +641,7 @@ textarea:focus {
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 12px;
-  min-height: 74px;
+  min-height: 62px;
   border-top: 1px solid var(--service-row-border);
   background: transparent;
   padding: 10px 2px 10px 18px;
@@ -676,14 +672,16 @@ textarea:focus {
 .service-row__main {
   display: flex;
   flex-direction: column;
+  justify-content: center;
   align-items: stretch;
-  gap: 4px;
+  gap: 0;
   min-width: 0;
 }
 
 .service-row__title {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 10px;
 }
 

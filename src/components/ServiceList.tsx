@@ -6,8 +6,8 @@ export type ServiceGroupSection = {
   label: string;
   services: ServiceView[];
   runningCount: number;
-  enabledCount: number;
   startableIds: string[];
+  stoppableIds: string[];
 };
 
 type ServiceListProps = {
@@ -22,7 +22,7 @@ type ServiceListProps = {
   onStopSelected: () => void;
   onRestartSelected: () => void;
   onToggleSelected: (id: string) => void;
-  onStartGroup: (groupKey: string) => void;
+  onToggleGroup: (groupKey: string) => void;
   onMoveGroup: (groupKey: string, direction: MoveDirection) => void;
   onMoveService: (serviceId: string, direction: MoveDirection) => void;
   onCopy: (service: ServiceView) => void;
@@ -45,7 +45,7 @@ export function ServiceList({
   onStopSelected,
   onRestartSelected,
   onToggleSelected,
-  onStartGroup,
+  onToggleGroup,
   onMoveGroup,
   onMoveService,
   onCopy,
@@ -94,9 +94,7 @@ export function ServiceList({
             <header className="service-group__head">
               <div className="service-group__title">
                 <strong>{group.label}</strong>
-                <span>{group.services.length} 个服务</span>
-                <span>{group.runningCount} 运行中</span>
-                <span>{group.enabledCount} 已启用</span>
+                <span>总数/运行中 {group.services.length}/{group.runningCount}</span>
               </div>
               <div className="service-group__actions">
                 <button
@@ -121,11 +119,22 @@ export function ServiceList({
                 </button>
                 <button
                   type="button"
-                  className="primary compact-btn"
-                  disabled={busy || group.startableIds.length === 0}
-                  onClick={() => onStartGroup(group.key)}
+                  className={`icon-compact-btn${group.runningCount === group.services.length ? " icon-compact-btn--danger" : ""}`}
+                  title={group.runningCount === group.services.length ? "停止本组" : "启动本组"}
+                  aria-label={group.runningCount === group.services.length ? "停止本组" : "启动本组"}
+                  disabled={
+                    busy ||
+                    (group.runningCount === group.services.length
+                      ? group.stoppableIds.length === 0
+                      : group.startableIds.length === 0)
+                  }
+                  onClick={() => onToggleGroup(group.key)}
                 >
-                  启动本组
+                  {group.runningCount === group.services.length ? (
+                    <Icon path="M8 8h8v8H8z" />
+                  ) : (
+                    <Icon path="M8 6.5v11l8-5.5-8-5.5Z" />
+                  )}
                 </button>
               </div>
             </header>
@@ -151,10 +160,6 @@ export function ServiceList({
                         {service.running ? `运行中 #${service.pid ?? "-"}` : "未运行"}
                       </span>
                     </div>
-                    <span className="service-row__meta">{service.command || "未配置启动命令"}</span>
-                    <span className="service-row__sub">
-                      {service.cwd || "未配置工作目录"} · {service.enabled ? "已启用" : "已禁用"}
-                    </span>
                   </div>
 
                   <div className="service-row__actions">
@@ -178,14 +183,39 @@ export function ServiceList({
                     >
                       <Icon path="m6 9 6 6 6-6" />
                     </button>
-                    <button type="button" className="compact-btn" disabled={busy} onClick={() => onCopy(service)}>
-                      复制
+                    <button
+                      type="button"
+                      className="icon-compact-btn"
+                      title="复制"
+                      aria-label="复制"
+                      disabled={busy}
+                      onClick={() => onCopy(service)}
+                    >
+                      <Icon path="M9 9h10v10H9zM5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1" />
                     </button>
-                    <button type="button" className="compact-btn" disabled={busy} onClick={() => onEdit(service)}>
-                      编辑
+                    <button
+                      type="button"
+                      className="icon-compact-btn"
+                      title="编辑"
+                      aria-label="编辑"
+                      disabled={busy}
+                      onClick={() => onEdit(service)}
+                    >
+                      <Icon path="M4 20h4l10-10-4-4L4 16v4ZM13 7l4 4" />
                     </button>
-                    <button type="button" className="compact-btn" disabled={busy} onClick={() => onToggle(service)}>
-                      {service.running ? "停止" : "启动"}
+                    <button
+                      type="button"
+                      className={`icon-compact-btn${service.running ? " icon-compact-btn--danger" : ""}`}
+                      title={service.running ? "停止" : "启动"}
+                      aria-label={service.running ? "停止" : "启动"}
+                      disabled={busy}
+                      onClick={() => onToggle(service)}
+                    >
+                      {service.running ? (
+                        <Icon path="M8 8h8v8H8z" />
+                      ) : (
+                        <Icon path="M8 6.5v11l8-5.5-8-5.5Z" />
+                      )}
                     </button>
                     <button type="button" className="compact-btn" disabled={busy} onClick={() => onRestart(service.id)}>
                       重启
@@ -195,11 +225,13 @@ export function ServiceList({
                     </button>
                     <button
                       type="button"
-                      className="danger-text compact-btn"
+                      className="icon-compact-btn icon-compact-btn--danger"
+                      title="删除"
+                      aria-label="删除"
                       disabled={busy}
                       onClick={() => onDelete(service.id)}
                     >
-                      删除
+                      <Icon path="M5 7h14M9 7V4h6v3m-8 0 1 12h8l1-12" />
                     </button>
                   </div>
                 </article>

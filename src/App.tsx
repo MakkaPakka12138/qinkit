@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { confirm, open } from "@tauri-apps/plugin-dialog";
+import { confirm, message, open } from "@tauri-apps/plugin-dialog";
 import { useEffect, useMemo, useRef, useState } from "react";
 import logoPng from "./assets/logo.png";
 import { ActionPanel } from "./components/ActionPanel";
@@ -13,7 +13,6 @@ import type {
   ImportServicesResult,
   LogType,
   MoveDirection,
-  ServiceConfig,
   ServiceForm,
   ServiceView,
   ThemeMode
@@ -49,7 +48,7 @@ export default function App() {
   const servicesRef = useRef<ServiceView[]>([]);
   const logServiceIdRef = useRef("");
   const activeLogTypeRef = useRef<LogType>("stdout");
-  const noticeTimerRef = useRef<number | undefined>(undefined);
+  const dialogQueueRef = useRef(Promise.resolve());
   const persistedServicesRef = useRef<ServiceView[]>([]);
   const orderSaveTimerRef = useRef<number | undefined>(undefined);
   const orderSaveVersionRef = useRef(0);
@@ -59,8 +58,6 @@ export default function App() {
 
   const [services, setServices] = useState<ServiceView[]>([]);
   const [busy, setBusy] = useState(false);
-  const [notice, setNotice] = useState("");
-  const [errorText, setErrorText] = useState("");
   const [editorOpen, setEditorOpen] = useState(false);
   const [editorMode, setEditorMode] = useState<"create" | "edit">("create");
   const [editingSourceId, setEditingSourceId] = useState("");
@@ -98,10 +95,9 @@ export default function App() {
   const selectedServiceIdSet = useMemo(() => new Set(selectedServiceIds), [selectedServiceIds]);
   const selectedCount = selectedServiceIds.length;
   const allSelected = services.length > 0 && selectedCount === services.length;
-  const { groupedServices, runningCount, enabledCount } = useMemo(() => {
+  const { groupedServices, runningCount } = useMemo(() => {
     const groups = new Map<string, ServiceGroupSection>();
     let runningCount = 0;
-    let enabledCount = 0;
 
     for (const service of services) {
       const key = service.group_name.trim();
@@ -113,18 +109,17 @@ export default function App() {
           label,
           services: [],
           runningCount: 0,
-          enabledCount: 0,
-          startableIds: []
+          startableIds: [],
+          stoppableIds: []
         };
 
       current.services.push(service);
       if (service.running) {
         runningCount += 1;
         current.runningCount += 1;
+        current.stoppableIds.push(service.id);
       }
-      if (service.enabled) {
-        enabledCount += 1;
-        current.enabledCount += 1;
+      if (service.enabled && !service.running) {
         current.startableIds.push(service.id);
       }
 
@@ -133,8 +128,7 @@ export default function App() {
 
     return {
       groupedServices: Array.from(groups.values()),
-      runningCount,
-      enabledCount
+      runningCount
     };
   }, [services]);
 
@@ -180,9 +174,6 @@ export default function App() {
 
     return () => {
       clearProcessScanTimer();
-      if (noticeTimerRef.current) {
-        window.clearTimeout(noticeTimerRef.current);
-      }
       if (orderSaveTimerRef.current) {
         window.clearTimeout(orderSaveTimerRef.current);
       }
@@ -220,7 +211,7 @@ export default function App() {
     return () => {
       window.removeEventListener("resize", syncWorkspaceOverflow);
     };
-  }, [errorText, notice, services]);
+  }, [services]);
 
   function clearProcessScanTimer() {
     if (processScanTimerRef.current) {
@@ -277,26 +268,16 @@ export default function App() {
     return list;
   }
 
-  function flash(message: string, isError = false) {
-    if (noticeTimerRef.current) {
-      window.clearTimeout(noticeTimerRef.current);
-    }
-
-    if (isError) {
-      setErrorText(message);
-      setNotice("");
-    } else {
-      setNotice(message);
-      setErrorText("");
-    }
-
-    noticeTimerRef.current = window.setTimeout(() => {
-      if (isError) {
-        setErrorText((current) => (current === message ? "" : current));
-      } else {
-        setNotice((current) => (current === message ? "" : current));
-      }
-    }, 3200);
+  function flash(text: string, isError = false) {
+    dialogQueueRef.current = dialogQueueRef.current
+      .catch(() => undefined)
+      .then(() =>
+        message(text, {
+          title: isError ? "操作失败" : "操作完成",
+          kind: isError ? "error" : "info"
+        }).then(() => undefined)
+      )
+      .catch(() => undefined);
   }
 
   async function refresh({ quiet = false, scanProcesses = false }: RefreshOptions = {}) {
@@ -896,13 +877,16 @@ export default function App() {
     setThemeMode((current) => (current === "dark" ? "light" : "dark"));
   }
 
-  async function startGroup(groupKey: string) {
+  async function toggleGroup(groupKey: string) {
     const targetGroup = groupedServices.find((group) => group.key === groupKey);
+    if (!targetGroup) return;
+
+    const shouldStop = targetGroup.services.length > 0 && targetGroup.runningCount === targetGroup.services.length;
     await runBatchAction(
-      "start_services",
-      targetGroup?.startableIds ?? [],
-      "当前分组没有可启动的已启用服务。",
-      `启动分组「${targetGroup?.label ?? "未命名"}」`
+      shouldStop ? "stop_services" : "start_services",
+      shouldStop ? targetGroup.stoppableIds : targetGroup.startableIds,
+      shouldStop ? "当前分组没有可停止的运行中服务。" : "当前分组没有可启动的服务。",
+      `${shouldStop ? "停止" : "启动"}分组「${targetGroup.label}」`
     );
   }
 
@@ -937,10 +921,7 @@ export default function App() {
           <ActionPanel
             serviceCount={services.length}
             runningCount={runningCount}
-            enabledCount={enabledCount}
             busy={busy}
-            notice={notice}
-            errorText={errorText}
             closeToTray={closeToTray}
             onRefresh={() => void refreshAfterManualAction(false)}
             onImport={() => void importConfig()}
@@ -962,7 +943,7 @@ export default function App() {
             onStopSelected={() => void stopSelected()}
             onRestartSelected={() => void restartSelected()}
             onToggleSelected={toggleSelectedService}
-            onStartGroup={(groupKey) => void startGroup(groupKey)}
+            onToggleGroup={(groupKey) => void toggleGroup(groupKey)}
             onMoveGroup={(groupKey, direction) => void moveGroup(groupKey, direction)}
             onMoveService={(serviceId, direction) => void moveService(serviceId, direction)}
             onCopy={openCopyModal}
